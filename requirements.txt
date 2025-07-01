@@ -1,0 +1,17 @@
+configmypy==0.2.0
+dedalus==3.0.3
+h5py==3.12.1
+imageio==2.36.1
+matplotlib==3.9.2
+mpi4py==4.0.1
+numpy==1.26.4
+pandas==2.2.2
+Pillow-SIMD==10.4.0
+PyYAML==6.0.2
+qmat==0.1.18
+scipy==1.13.1
+tensorboard==2.18.0
+tqdm==4.66.5
+
+
+
