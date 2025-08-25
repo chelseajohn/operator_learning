@@ -1,7 +1,9 @@
 import torch
 from torch.utils.data import  DataLoader, random_split, Subset
+from torch.utils.data.distributed import DistributedSampler
 from collections import defaultdict
 from operator_learning.data.hdf5_dataset import HDF5Dataset, DomainDataset
+from operator_learning.utils.communication import get_world_size, get_rank
 
 def variable_tensor_collate_fn(batch):
     """

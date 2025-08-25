@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import socket
 from datetime import datetime
 from time import sleep
 from mpi4py import MPI
@@ -212,7 +213,7 @@ def runSimu(dirName, nDim=2, Rayleigh=1e7, resFactor=1, baseDt=1e-2/2, seed=999,
 
 
 if __name__ == '__main__':
-    runSim("test", nDim=2)
-    runSim("test", nDim=3)
+    runSimu("test", nDim=2)
+    runSimu("test", nDim=3)
 
   

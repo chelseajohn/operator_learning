@@ -2,7 +2,7 @@
 
 This folder provides scripts to:
 
-1. Generate Dedalus-based simulations of Rayleigh-Bénard convection (2D/3D).
+1. Generate Dedalus-based simulations of Rayleigh-Bénard convection in 2D using Dedalus.
 2. Process simulation outputs into training datasets.
 3. Load and sample datasets for training Fourier Neural Operator (FNO) models
 4. Perform spectrum analysis of velocity fields.
@@ -11,8 +11,8 @@ This folder provides scripts to:
 
 ## Simulation & Processing Scripts
 
-- `run1_simu.py`: Run Dedalus simulations with varying seeds and stores outputs in structured folders.
-- `run2_processing.py`: Converts raw simulation data into structured HDF5 datasets.
+- `run1_simu_dedalus.py`: Run Dedalus simulations with varying seeds and stores outputs in structured folders.
+- `run2_processing_dedalus.py`: Converts raw simulation data into structured HDF5 datasets.
 - `dedalus_simu.py`: Core numerical solver for 2D/3D Rayleigh-Bénard convection.
 - `dedalus_prop.py`: Utilities for reading, slicing, and computing spectra from Dedalus outputs.
 
@@ -23,7 +23,7 @@ This folder provides scripts to:
 ### Usage
 
 ```bash
-python run1_simu.py --dataDir simuData --nDim 2 --Rayleigh 1e7 --nSimu 1 --dtData 0.1
+python run1_simu_dedalus.py --dataDir simuData --nDim 2 --Rayleigh 1e7 --nSimu 1 --dtData 0.1
 ```
 
 ### Key Parameters
@@ -45,7 +45,7 @@ python run1_simu.py --dataDir simuData --nDim 2 --Rayleigh 1e7 --nSimu 1 --dtDat
 ### Usage
 
 ```bash
-python run2_processing.py --dataDir simuData --dataFile dataset.h5
+python run2_processing_dedalus.py --dataDir simuData --dataFile dataset.h5
 ```
 
 ### Key Parameters

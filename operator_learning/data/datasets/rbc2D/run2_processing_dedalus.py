@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os
 import sys
 from pathlib import Path
 base_path = Path(__file__).resolve().parents[4]
@@ -19,7 +18,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     "--dataDir", default="simuData", help="directory containing simulation data")
 parser.add_argument(
-    "--nDim", default=2, type=int, help="2-D or 3-D")
+    "--nDim", default=2, type=int, help="2-D")
 parser.add_argument(
     "--iBeg", default=0, help="starting index of data sample", type=int)
 parser.add_argument(

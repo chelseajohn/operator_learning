@@ -1,0 +1,27 @@
+[project]
+name = "operator_learning"
+version = "0.1.0"
+description = "Learning Operators with Neural Networks"
+authors = [
+    { name = "Chelsea Maria John", email = "chelseamariajohn@gmail.com" }
+]
+
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+
+# use requirements.txt
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["operator_learning*"] 
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[project.urls]
+Homepage = "https://github.com/chelseajohn/operator_learning"

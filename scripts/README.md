@@ -28,7 +28,7 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--disableTensorboard`: Disable Tensorboard logging
 - `--lossesFile`: File to write loss values
 
-### `eval.py`
+### `eval{2d,3d}.py`
 Comprehensive evaluation script for trained FNO models with detailed analysis and visualization.
 
 **Features:**
@@ -37,12 +37,13 @@ Comprehensive evaluation script for trained FNO models with detailed analysis an
 - Relative L2 error computation over time
 - Contour plots for solution visualization
 - Spectral analysis and comparison
+- Nusselt number analysis (for 3D)
 - Inference time benchmarking
 - Automated report generation in Markdown format
 
 **Usage:**
 ```bash
-python eval.py --checkpoint model.pth --dataFile dataset.h5 --tSteps 10
+python eval{2d,3d}.py --checkpoint model.pt --dataFile dataset.h5 --tSteps 10
 ```
 
 **Key Parameters:**
@@ -58,9 +59,9 @@ python eval.py --checkpoint model.pth --dataFile dataset.h5 --tSteps 10
 - `--config`: Configuration file for evaluation parameters
 
 ### `eval_template.md`
-Markdown template for evaluation report generation. Used internally by `eval.py` to structure the evaluation results.
+Markdown template for evaluation report generation. Used internally by `eval_{2d,3d}.py` to structure the evaluation results.
 
-### Evaluation Outputs (`eval.py`)
+### Evaluation Outputs 
 ```
 evalDir/
 ├── eval_run{runId}.md                    # Evaluation report
@@ -71,7 +72,9 @@ evalDir/
 ├── run{runId}_D{iDec}_contour_ref_solution.png
 ├── run{runId}_D{iDec}_contour_ref_update.png
 ├── run{runId}_D{iDec}_spectrum.png
-└── run{runId}_D{iDec}_spectrum_HF.png
+├── run{runId}_D{iDec}_spectrum_HF.png (only for 2D)
+└── run{runId}_D{iDec}_nusPlot.png (only for 3D)
+
 ```
 
 ## Dataset Requirements

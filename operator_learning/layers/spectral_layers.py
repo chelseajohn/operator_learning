@@ -77,9 +77,9 @@ class SpectralConv(nn.Module):
         x[nBatch, dv, nX, nY, nZ] -> [nBatch, dv, fX = nX, fY = nY, fZ = nZ/2+1]
         """
         if self.order == 2:
-            x = torch.fft.rfft2(x, norm="ortho")   # RFFT on last 2 dimensions
+            x = torch.fft.rfftn(x, dim=(-2,-1), norm="ortho")   # RFFT on last 2 dimensions
         else:
-            x = torch.fft.rfft3(x, norm="ortho")   # RFFT on last 3 dimensions
+            x = torch.fft.rfftn(x, dim=(-3,-2,-1), norm="ortho")   # RFFT on last 3 dimensions
         return x
 
     def _toRealSpace(self, x, org_size):
@@ -88,9 +88,9 @@ class SpectralConv(nn.Module):
         x[nBatch, dv, fX = nX, fY = nY, fZ = nZ/2+1] -> [nBatch, dv, nX, nY, nZ]
         """
         if self.order == 2:
-            x = torch.fft.irfft2(x, s=org_size, norm="ortho")  # IRFFT on last 2 dimensions
+            x = torch.fft.irfftn(x, s=org_size, dim=(-2,-1), norm="ortho")  # IRFFT on last 2 dimensions
         else:
-            x = torch.fft.irfft3(x, s=org_size, norm="ortho")  # IRFFT on last 3 dimensions
+            x = torch.fft.irfftn(x, s=org_size, dim=(-3,-2,-1), norm="ortho")  # IRFFT on last 3 dimensions
         return x
 
 
@@ -120,14 +120,14 @@ class SpectralConv(nn.Module):
             Ty = self.T(self.kY, f_dims[1], x.device, sym = True)
             Tz = self.T(self.kZ, f_dims[2], x.device)
             # -- Tx[kX, fX], Ty[kY, fY], Tz[kZ, fZ]
-            x = torch.einsum("ax,by,cz,ejxyz->eijabc", Tx, Ty, Tz, x)
+            x = torch.einsum("ax,by,cz,ejxyz->ejabc", Tx, Ty, Tz, x)
 
             #  Apply R[dv, dv, kX, kY, kZ] -> [nBatch, dv, kX, kY, kZ]
             R = deformat_complexTensor(self.R).to(x.device)
             x = torch.einsum("ijabc,ejabc->eiabc", R, x)
 
            # Padding on high frequency modes -> [nBatch, dv, fX, fY, fZ]
-            x_padded = torch.einsum("xa,yb,zc,eiabc->eixyz", Tx.T, Ty.T, Tz.T, x)
+            x = torch.einsum("xa,yb,zc,eiabc->eixyz", Tx.T, Ty.T, Tz.T, x)
 
 
         # Transform back to Real space -> [nBatch, dv, nX, nY, ..]

@@ -16,10 +16,10 @@ Contour plots :
 - [model output]({contourPlotSol})
 - [model update]({contourPlotUpdate})
 - [absolute error]({contourPlotErr})
-- [dedalus output]({contourPlotSolRef})
-- [dedalus update]({contourPlotUpdateRef})
+- [dedalus/pySDC output]({contourPlotSolRef})
+- [dedalus/pySDC update]({contourPlotUpdateRef})
 
 Averaged spectrum :
 
-- [full]({spectrumPlot})
-- [high frequencies]({spectrumPlotHF})
+- [full spectrum]({spectrumPlot})
+

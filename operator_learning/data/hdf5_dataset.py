@@ -4,7 +4,7 @@ import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from operator_learning.data.datasets.rbc.dedalus_prop import OutputFiles
+from operator_learning.data.datasets.rbc2D.dedalus_prop import OutputFiles
 from operator_learning.utils.misc import print_rank0
 
 class HDF5Dataset(Dataset):
@@ -95,16 +95,18 @@ class HDF5Dataset(Dataset):
         else:
             xGrid, yGrid, zGrid = self.grid
             print_rank0(f" -- grid shape : ({xGrid.size}, {yGrid.size}, {zGrid.size})")
-            print_rank0(f" -- grid domain : [{xGrid.min():.1f}, {xGrid.max():.1f}] x [{yGrid.min():.1f}, \
-                                       {yGrid.max():.1f}] x [{zGrid.min():.1f}, {zGrid.max():.1f}]")
+            print_rank0(f" -- grid domain : [{xGrid.min():.1f}, {xGrid.max():.1f}] x [{yGrid.min():.1f},{yGrid.max():.1f}] x [{zGrid.min():.1f}, {zGrid.max():.1f}]")
         infos = self.infos
         print_rank0(f" -- nSimu : {infos['nSimu'][()]}")
         print_rank0(f" -- dtData : {infos['dtData'][()]:1.2g}")
         print_rank0(f" -- inSize : {infos['inSize'][()]}")                # T_in
         print_rank0(f" -- outStep : {infos['outStep'][()]}")              # T
         print_rank0(f" -- inStep : {infos['inStep'][()]}")                # tStep
-        print_rank0(f" -- nSamples (per simu) : {infos['nSamples'][()]}")
-        print_rank0(f" -- nSamples (total) : {infos['nSamples'][()]*infos['nSimu'][()]}")
+        if "nSamples" in infos:
+            print_rank0(f" -- nSamples (per simu) : {infos['nSamples'][()]}")
+            print_rank0(f" -- nSamples (total) : {infos['nSamples'][()]*infos['nSimu'][()]}")
+        elif "nSamplesTotal" in infos:
+            print_rank0(f" -- nSamples (total) : {infos['nSamplesTotal'][()]}")
         print_rank0(f" -- dtInput : {infos['dtInput'][()]:1.2g}")
         print_rank0(f" -- outType : {infos['outType'][()].decode('utf-8')}")
         print_rank0(f" -- outScaling : {infos['outScaling'][()]:1.2g}")
@@ -256,8 +258,11 @@ class DomainDataset(HDF5Dataset):
         print_rank0(f" -- inSize : {infos['inSize'][()]}")          # T_in
         print_rank0(f" -- outStep : {infos['outStep'][()]}")        # T
         print_rank0(f" -- inStep : {infos['inStep'][()]}")          # tStep
-        print_rank0(f" -- nSamples (per simu) : {infos['nSamples'][()]}")
-        print_rank0(f" -- nSamples (total) : {infos['nSamples'][()] * infos['nSimu'][()]}")
+        if "nSamples" in infos:
+            print_rank0(f" -- nSamples (per simu) : {infos['nSamples'][()]}")
+            print_rank0(f" -- nSamples (total) : {infos['nSamples'][()]*infos['nSimu'][()]}")
+        elif "nSamplesTotal" in infos:
+            print_rank0(f" -- nSamples (total) : {infos['nSamplesTotal'][()]}")
         print_rank0(f" -- dtInput : {infos['dtInput'][()]:1.2g}")
         print_rank0(f" -- outType : {infos['outType'][()].decode('utf-8')}")
         print_rank0(f" -- outScaling : {infos['outScaling'][()]:1.2g}")
@@ -275,6 +280,7 @@ def createDataset(
         dataDir, inSize, outStep, inStep, outType, outScaling, dataFile,
         verbose=False, nDim=2, **kwargs):
     assert inSize == 1, "inSize != 1 not implemented yet ..."
+    assert nDim == 2, "nDim >2 not implemented yet ..."
     simDirsSorted = sorted(glob.glob(f"{dataDir}/simu_*"), key=lambda f: int(f.split('simu_',1)[1]))
     nSimu = int(kwargs.get("nSimu", len(simDirsSorted)))
     simDirs = simDirsSorted[:nSimu]
@@ -287,11 +293,8 @@ def createDataset(
     nFields = sum(outFiles.nFields)
     fieldShape = outFiles.shape
     times = outFiles.times().ravel()
-    if nDim == 2:
-        xGrid, yGrid = outFiles.x, outFiles.y  # noqa: F841 (used lated by an eval call)
-    else:
-        xGrid, yGrid, zGrid = outFiles.x, outFiles.y, outFiles.z # noqa: F841 (used lated by an eval call)
-    
+    xGrid, yGrid = outFiles.x, outFiles.y  # noqa: F841 (used lated by an eval call)
+
     dtData = times[1]-times[0]
     dtInput = dtData*outStep  # noqa: F841 (used lated by an eval call)
     dtSample = dtData*inStep  # noqa: F841 (used lated by an eval call)
@@ -307,9 +310,6 @@ def createDataset(
         "dtData", "dtInput", "xGrid", "yGrid", "nSimu", "nSamples", "dtSample",
     ]
     
-    if nDim == 3:
-        infoParams += ["zGrid"]
-
     print_rank0(f"Creating dataset from {nSimu} simulations, {nSamples} samples each ...")
     dataset = h5py.File(dataFile, "w")
     for name in infoParams:
