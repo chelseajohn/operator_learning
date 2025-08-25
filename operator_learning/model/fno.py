@@ -1,6 +1,3 @@
-import math
-import numpy as np
-
 import torch 
 import torch.nn as nn
 import pandas as pd
@@ -163,7 +160,7 @@ class FNO(nn.Module):
                                                         bias=bias)
                                         for _ in range(n_layers)])
 
-        # self.memory = CudaMemoryDebugger(print_mem=True)
+        self.memory = CudaMemoryDebugger(print_mem=True)
         self.get_subdomain_output = get_subdomain_output
         if self.get_subdomain_output:
             self.iXBeg = iXBeg
@@ -230,6 +227,9 @@ class FNO(nn.Module):
 
 if __name__ == "__main__":
     # Quick script testing
-    model = FNO(da=4, dv=4, du=4, n_layers=4, kX=12, kY=12)
-    uIn = torch.rand(5, 4, 256, 64)
-    print_rank0(model(uIn).shape)
+    model2D = FNO(da=4, dv=4, du=4, n_layers=4, kX=12, kY=12)
+    model3D = FNO(da=5, dv=10, du=5, n_layers=4, kX=12, kY=12, kZ=12, n_dims=3)
+    uIn_2d = torch.rand(5, 4, 256, 64)
+    uIn_3d = torch.rand(5, 5, 64, 64, 32)
+    print_rank0(f"FNO2D Model Output:{model2D(uIn_2d).shape}")
+    print_rank0(f"FNO3D Model Output:{model3D(uIn_3d).shape}")

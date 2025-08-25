@@ -17,7 +17,7 @@ from operator_learning.utils.misc import print_rank0
 class FourierNeuralOperator:
     
     TRAIN_DIR = None
-    LOSSES_FILE = None
+    LOSSES_FILE = 'loss.txt'
     USE_TENSORBOARD = True
     
 
@@ -340,7 +340,7 @@ class FourierNeuralOperator:
             map_location = {f'cuda:0': f'{self.device}'}
         else:
             map_location = self.device
-        checkpoint = torch.load(self.fullPath(filename), map_location=self.device)
+        checkpoint = torch.load(self.fullPath(filename), map_location=map_location)
 
         if hasattr(self, "modelConfig") and self.modelConfig != checkpoint['model']:
             for key, value in self.modelConfig.items():

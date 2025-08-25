@@ -1,2 +1,6 @@
 scripts/launch_scripts
+scripts/eval*
 __pycache__/
+rbc_variables.sh
+setup.sh
+*egg-info

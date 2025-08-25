@@ -1,7 +1,5 @@
-import os
 import h5py
 import glob
-import random
 import numpy as np
 from qmat.lagrange import LagrangeApproximation
 
@@ -31,75 +29,21 @@ def decomposeRange(iBeg, iEnd, step, maxSize):
 
     return subRanges
 
-def computeMeanSpectrum(uValues, xGrid=None, zGrid=None, verbose=False):
-    """ uValues[nT, nVar, nX, (nY), nZ] """
+def computeMeanSpectrum(uValues):
+    """ uValues[nT, nVar, nX, nZ] """
     uValues = np.asarray(uValues)
-    nT, nVar, *gridSizes = uValues.shape
-    dim = len(gridSizes)
-    # assert nVar == dim
-    if verbose:
-        print(f"Computing Mean Spectrum on u[{', '.join([str(n) for n in uValues.shape])}]")
+    print(f"Computing Mean Spectrum on u[{', '.join([str(n) for n in uValues.shape])}]")
 
     energy_spectrum = []
-    if dim == 2:
-
-        for i in range(2):
-            u = uValues[:, i]                           # (nT, Nx, Nz)
-            spectrum = np.fft.rfft(u, axis=-2)          # over Nx -->  #(nT, k, Nz)
-            spectrum *= np.conj(spectrum)               # (nT, k, Nz)
-            spectrum /= spectrum.shape[-2]              # normalize with Nx --> (nT, k, Nz)
-            spectrum = np.mean(spectrum.real, axis=-1)  # mean over Nz --> (nT,k)
-            energy_spectrum.append(spectrum)
-
-    elif dim == 3:
-
-        # Check for a cube with uniform dimensions
-        nX, nY, nZ = gridSizes
-        assert nX == nY
-        size = nX // 2
-
-        # Interpolate in z direction
-        assert xGrid is not None and zGrid is not None
-        if verbose: print(" -- interpolating from zGrid to a uniform mesh ...")
-        from qmat.lagrange import LagrangeApproximation
-        P = LagrangeApproximation(zGrid).getInterpolationMatrix(xGrid)
-        np.einsum('ij,tvxyj->tvxyi', P, uValues, out=uValues)
-
-        # Compute 3D mode shells
-        k1D = np.fft.fftfreq(nX, 1/nX)**2
-        kMod = k1D[:, None, None] + k1D[None, :, None] + k1D[None, None, :]
-        kMod **= 0.5
-        idx = kMod.copy()
-        idx *= (kMod < size)
-        idx -= (kMod >= size)
-
-        idxList = range(int(idx.max()) + 1)
-        flatIdx = idx.ravel()
-
-        # Fourier transform and square of Im,Re
-        if verbose: print(" -- 3D FFT on u, v & w ...")
-        uHat = np.fft.fftn(uValues, axes=(-3, -2, -1))
-
-        if verbose: print(" -- square of Im,Re ...")
-        ffts = [uHat[:, i] for i in range(nVar)]
-        reParts = [uF.reshape((nT, nX*nY*nZ)).real**2 for uF in ffts]
-        imParts = [uF.reshape((nT, nX*nY*nZ)).imag**2 for uF in ffts]
-
-        # Spectrum computation
-        if verbose: print(" -- computing spectrum ...")
-        spectrum = np.zeros((nT, size))
-        for i in idxList:
-            if verbose: print(f" -- k{i+1}/{len(idxList)}")
-            kIdx = np.argwhere(flatIdx == i)
-            tmp = np.empty((nT, *kIdx.shape))
-            for re, im in zip(reParts, imParts):
-                np.copyto(tmp, re[:, kIdx])
-                tmp += im[:, kIdx]
-                spectrum[:, i] += tmp.sum(axis=(1, 2))
-        spectrum /= 2*(nX*nY*nZ)**2
-
+    for i in range(2):
+        u = uValues[:, i]                           # (nT, Nx, Nz)
+        spectrum = np.fft.rfft(u, axis=-2)          # over Nx -->  #(nT, k, Nz)
+        spectrum *= np.conj(spectrum)               # (nT, k, Nz)
+        spectrum /= spectrum.shape[-2]              # normalize with Nx --> (nT, k, Nz)
+        spectrum = np.mean(spectrum.real, axis=-1)  # mean over Nz --> (nT,k)
         energy_spectrum.append(spectrum)
-        if verbose: print(" -- done !")
+
+    print(" -- done !")
 
     return energy_spectrum
 
@@ -129,9 +73,6 @@ class OutputFiles():
             if dim == 2:
                 self.z = np.array(vData0.dims[3]["z"])
                 self.y = self.z
-            elif dim == 3:
-                self.y = np.array(vData0.dims[3]["y"])
-                self.z = np.array(vData0.dims[4]["z"])
             else:
                 raise NotImplementedError(f"{dim = }")
 
@@ -168,17 +109,13 @@ class OutputFiles():
 
     @property
     def shape(self):
-        if self.dim == 2:
-            return (4, self.nX, self.nZ)
-        elif self.dim == 3:
-            return (4, self.nX, self.nY, self.nZ)
+        return (4, self.nX, self.nZ)
+       
 
     @property
     def k(self):
-        if self.dim == 2:
-            return getModes(self.x)
-        elif self.dim == 3:
-            return getModes(self.x), getModes(self.y)
+        return getModes(self.x)
+       
 
     def vData(self, iFile:int):
         return self.file(iFile)['tasks']['velocity']
@@ -210,8 +147,6 @@ class OutputFiles():
             data["velocity"][iTime, 0],
             data["velocity"][iTime, 1],
             ]
-        if self.dim == 3:
-            fields += [data["velocity"][iTime, 2]]
         fields += [
             data["buoyancy"][iTime],
             data["pressure"][iTime]
@@ -273,7 +208,7 @@ class OutputFiles():
             if verbose:
                 print(f" -- computing for fields in range ({iBegSub},{iEndSub},{stepSub})")
             velocity = self.readField(iFile, "velocity", iBegSub, iEndSub, stepSub, verbose)
-            spectra += computeMeanSpectrum(velocity, verbose=verbose, xGrid=self.x, zGrid=self.z)
+            spectra += computeMeanSpectrum(velocity)
         return np.concatenate(spectra)
 
     def getFullMeanSpectrum(self, iBeg:int, iEnd=None):

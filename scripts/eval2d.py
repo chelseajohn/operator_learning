@@ -13,7 +13,7 @@ import torch
 from timeit import default_timer
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from operator_learning.data.datasets.rbc.dedalus_prop import computeMeanSpectrum, getModes
+from operator_learning.data.datasets.rbc2D.dedalus_prop import computeMeanSpectrum, getModes
 from operator_learning.data import HDF5Dataset
 from operator_learning.utils.misc import readConfig
 from training.train_fno import FourierNeuralOperator
@@ -355,6 +355,9 @@ for iDec in range(len(decomps)):
     # -------------------------------------------------------------------------
     # -- Write slices evaluation in summary
     # -------------------------------------------------------------------------
+    if spectrumPlotHF is not None:
+        TEMPLATE += f"- [high frequencies]({spectrumPlotHF})\n"
+
     summary.write(TEMPLATE.format(
         iDec=iDec,
         device=device_name,

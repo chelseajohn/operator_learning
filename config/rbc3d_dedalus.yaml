@@ -1,32 +1,31 @@
 simu:
-  dataDir: simuData
-  nDim: 2
-  Rayleigh: 1e7
-  resFactor: 1
-  seed: 12345
-  dtSimu: 0.001
-  tInit: 50
-  tEnd: 100
-  nSimu: 1
-  dtData: 0.001
+  dataDir: pysdc_fno/rbc3d_1e-5_pysdc
+  Rayleigh: 1e5
+  Pr: 0.7
+  resFactor: 32
+  nDim: 3
+  dtSimu: [6e-2, 4e-2, 2e-2, 1e-2, 5e-3, 2e-3]
+  iBeg: 100
+  nSimu: 6
+  dtData: 0.5
+
   
 sample:
   inSize: 1      # number of input fields
   outStep: 1     # iOutField = iField + outstep
-  inStep: 500    # slice interval
+  inStep: 1      # slice interval
 
 data:
-  outType: update
-  outScaling: 1000
-  space_dim: 2
+  outType: solution
+  outScaling: 1
+  space_dim: 3
   xStep: 1
   yStep: 1
   zStep: 1
-  seed: null
-  dataFile: dataset_256x64_Ra1e7_dt1e-3_update.h5
+  dataFile: rbc3d_1e-5_pysdc/RBC3DG4Ra1e5-res32_solution.h5
   trainRatio: 0.8
   batchSize: 20
-  sampling_mode: None  # [fixed, ordered, random]
+  sampling_mode: None  # Domain Sampling: [fixed, ordered, random]
   pad_to_fullGrid: false
   use_fixedPatch_startIdx: false
   nPatch_per_sample: 1
@@ -37,13 +36,13 @@ data:
   # patch_startIdx: 
 
 model:
-  da: 4
-  du: 4
-  dv: 16
+  da: 5
+  du: 5
+  dv: 25
   kX: 12
   kY: 12
-  kZ: None
-  n_dims: 2
+  kZ: 6
+  n_dims: 3
   n_layers: 2
   bias: false
   non_linearity: gelu
@@ -57,8 +56,10 @@ model:
   get_subdomain_output: false             # set to true only for inference
   iXBeg: 0
   iYBeg: 0
-  iXEnd: 256
-  iYEnd: 32
+  iZBeg: 0
+  iXEnd: 64
+  iYEnd: 64
+  iZEnd: 32
 
 optim:
   name: adam
@@ -77,21 +78,22 @@ loss:
   absolute: false
   
 parallel_strategy:
-  ddp: false    # Distributed Data Parallel
+  ddp: true    # Distributed Data Parallel
   gpus_per_node: 4
 
 train:
   trainDir: trainDir
-  epochs: 10
-  checkpoint: model.pt
-  saveInterval: 5
+  epochs: 1000
+  checkpoint: None
+  saveInterval: 100
   disableTensorboard: false
 
 eval:
-  iSimu: 0
+  nSamples: 100
   runId: 1
-  imgExt: pdf
-  evalDir: eval2D
+  imgExt: png
+  evalDir: eval3D
   tSteps: 1
-  model_dt: 1e-3
+  model_dt: 0.5
+  subtitle: "(64,64,32)"
  

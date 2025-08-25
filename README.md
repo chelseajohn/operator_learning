@@ -24,7 +24,7 @@ git clone https://github.com/chelseajohn/operator_learning.git
 cd operator_learning
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 ---
@@ -67,4 +67,4 @@ srun python -u -m torch.distributed.run   \
 
 ## Problems Solved
 
-- **Rayleigh-Bénard convection** in 2D using FNO, with datasets generated via the pseudo-spectral solver [Dedalus](https://dedalus-project.readthedocs.io/en/latest/).
+- **Rayleigh-Bénard convection** in 2D/3D using FNO, with datasets generated via the pseudo-spectral solver [Dedalus](https://dedalus-project.readthedocs.io/en/latest/) for 2D and [pySDC](https://zenodo.org/records/15196003) for 3D.
