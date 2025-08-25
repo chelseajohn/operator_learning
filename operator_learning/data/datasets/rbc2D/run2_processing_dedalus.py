@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os
 import sys
 from pathlib import Path
 base_path = Path(__file__).resolve().parents[4]

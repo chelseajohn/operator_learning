@@ -6,7 +6,6 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader, DistributedSampler
 
 from operator_learning.data import getDataLoaders
 from operator_learning.model import FNO

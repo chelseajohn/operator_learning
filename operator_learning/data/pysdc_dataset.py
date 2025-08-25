@@ -2,8 +2,6 @@ import glob
 import h5py
 import numpy as np
 from typing import List, Optional, Union
-import torch
-from torch.utils.data import Dataset
 from operator_learning.utils.misc import print_rank0
 from pySDC.helpers.fieldsIO import FieldsIO
 
