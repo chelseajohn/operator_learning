@@ -22,11 +22,12 @@ class FourierNeuralOperator:
 
     def __init__(self, data:dict=None, model:dict=None, optim:dict=None, 
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
-                loss:dict=None, checkpoint=None, eval_only=False):
+                loss:dict=None, checkpoint=None, eval_only=False, debug=False):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.rank = int(os.getenv('RANK', '0'))
         self.world_size = int(os.getenv('WORLD_SIZE', '1'))
+        self.debug = debug
 
         if parallel_strategy is not None:
             gpus_per_node = parallel_strategy.pop("gpus_per_node", 4)
@@ -58,9 +59,9 @@ class FourierNeuralOperator:
         self.zStep = data.pop("zStep", 1)
         data.pop("outType", None)
         data.pop("outScaling", None)
-        self.use_domain_sampling = True if self.data_config['sampling_mode'] is not None else False
+        self.use_domain_sampling = True if self.data_config['sampling_mode'] is not None else False  # only for 2D
 
-        # sample : [batchSize, 4, nX, nY, (nZ)]
+        # sample : [batchSize, 4(5), nX, nY, (nZ)]
         self.trainLoader, self.valLoader, self.dataset = getDataLoaders(**data,kX=model['kX'], kY=model['kY'], kZ=model['kZ'])
         self.outType = self.dataset.outType
         self.outScaling = self.dataset.outScaling
@@ -83,18 +84,18 @@ class FourierNeuralOperator:
 
         # Loss tracking
         self.losses = {
-            "model": {"avg_valid": -1, "avg_train": -1, "valid": -1, "train": -1},
+            "model": {"valid": -1, "train": -1},
             "id": {"valid": self.idLoss("valid"), "train": self.idLoss("train")},
         }
         
         print_rank0("### Model Infos ###")
-        self.setupModel(model)
-        self.setupOptimizer(optim)
-        self.setupLRScheduler(lr_scheduler)
-
+        
         if checkpoint is not None:
             self.load(checkpoint)
         else:
+            self.setupModel(model)
+            self.setupOptimizer(optim)
+            self.setupLRScheduler(lr_scheduler)
             self.epochs = 0
             
         self.tCompEpoch = 0
@@ -119,7 +120,7 @@ class FourierNeuralOperator:
         name = optim_config.pop("name")
         optim_class = {
             "adam": torch.optim.Adam,
-            "adamw": torch.optim.AdamW,
+            "adamW": torch.optim.AdamW,
         }.get(name)
 
         if optim_class is None:
@@ -185,8 +186,7 @@ class FourierNeuralOperator:
         gradsEpoch = 0.0
         idLoss = self.losses['id']['train']
 
-
-        if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
+        if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:  # only for 2D
             # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, 4, nX, ny]
             inp_list, out_list = next(data_iter)
             nBatches = len(inp_list)
@@ -204,8 +204,46 @@ class FourierNeuralOperator:
             loss = self.lossFunction(pred, ref, inp)
 
             optimizer.zero_grad()
+            if self.debug:
+                print_rank0(f"[DEBUG] batch loss: {loss.item():.6e}, pred min/max: {pred.min().item():.6e}/{pred.max().item():.6e}, ref min/max: {ref.min().item():.6e}/{ref.max().item():.6e}")
+            
             loss.backward()
+            
+            if self.debug:
+                any_grad_nonzero = False
+                for name, p in self.model.named_parameters():
+                    if p.grad is not None and p.grad.abs().sum() > 0:
+                        any_grad_nonzero = True
+                        break
+                print_rank0(f"[DEBUG] Any nonzero gradients: {any_grad_nonzero}")
+                for name, param in self.model.named_parameters():
+                    if param.grad is None:
+                        print_rank0(f"[DEBUG] {name} has no gradient")
+                    else:
+                        print_rank0(f"[DEBUG] {name} grad mean: {param.grad.mean().item():.6e}")
+
+                real_model = self.model.module if self.DDP_enabled else self.model
+                param_before = real_model.P.layers[0].weight.clone()
+
             optimizer.step()
+
+            if self.debug:
+                param_after = real_model.P.layers[0].weight
+                print_rank0(f"Param changed: {not torch.allclose(param_before, param_after)}")
+                param_change = (param_before - param_after).norm().item()
+                print_rank0(f"[DEBUG] Parameter change norm: {param_change:.6e}")
+                # check if params update + optimizer states populated
+                with torch.no_grad():
+                    first_param = next(model.parameters())
+                    print_rank0(f"[DEBUG][train] Param[0] value sample: {first_param.view(-1)[0].item():.6e}")
+                opt_state = optimizer.state_dict()
+                if opt_state["state"]:
+                    first_state = next(iter(opt_state["state"].values()))
+                    for k, v in first_state.items():
+                        if isinstance(v, torch.Tensor):
+                            print_rank0(f"[DEBUG][train] Optimizer state {k}: mean={v.float().mean().item():.6e}")
+                else:
+                    print_rank0("[DEBUG][train] Optimizer state is EMPTY after step()!")
 
             grads = torch.cat([p.grad.flatten() for p in model.parameters() if p.grad is not None])
             grad_norm = grads.norm()
@@ -243,7 +281,7 @@ class FourierNeuralOperator:
         idLoss = self.losses['id']['valid']
         data_iter = iter(self.valLoader)
 
-        if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
+        if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:  # only for 2D
             # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, 4, nX, ny]
             inp_list, out_list = next(data_iter) 
             nBatches = len(inp_list)
@@ -331,6 +369,11 @@ class FourierNeuralOperator:
             "lr_scheduler": self.scheduler_name,
             "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
             }
+        
+        if self.debug:
+            #  verify optimizer state saved
+            print_rank0(f"[DEBUG][save] Saving optimizer with {len(self.optimizer.state_dict()['state'])} entries")
+
         if self.rank == 0:
             torch.save(checkpoint, path)
 
@@ -347,38 +390,56 @@ class FourierNeuralOperator:
                     checkpoint['model'][key] = value
             print_rank0("WARNING : different model settings in config file,"
                     " overwriting with config from checkpoint ...")
+            
         print_rank0(f"Model: {checkpoint['model']}")
-        self.setupModel(checkpoint["model"])
         state_dict = checkpoint['model_state_dict']
+
         # creating new OrderedDict for model trained without DDP but used now with DDP 
         # or model trained using DPP but used now without DDP
         new_state_dict = OrderedDict()
         for k, v in state_dict.items():
             if self.DDP_enabled:
-                if k[:7] == 'module.':
-                    name = k
-                else:
-                    name = 'module.'+ k
+                name = k if k.startswith('module.') else 'module.' + k
             else:
-                if k[:7] == 'module.':
-                    name = k[7:]
-                else:
-                    name = k    
+                name = k[7:] if k.startswith('module.') else k
             if v.dtype == torch.complex64:
                 new_state_dict[name] = torch.view_as_real(v)
             else:
                 new_state_dict[name] = v
+
+        self.setupModel(checkpoint['model'])
         self.model.load_state_dict(new_state_dict)
         self.outType = checkpoint["outType"]
         self.outScaling = checkpoint["outScaling"]
         self.epochs = checkpoint.get("epochs")
+
         try:
             self.losses['model'] = checkpoint['losses']
         except AttributeError:
             self.losses = {"model": checkpoint['losses']}
+
         if not modelOnly:
+            self.setupOptimizer({"name": checkpoint['optim']})
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            
+            # Move optimizer state tensors to correct device
+            for state in self.optimizer.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.to(self.device)
+
+            self.setupLRScheduler({"scheduler": checkpoint['lr_scheduler']}.update(checkpoint['lr_scheduler_state_dict']))
             self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
+
+            if self.debug:
+                # inspect optimizer state after load
+                opt_state = self.optimizer.state_dict()
+                print_rank0(f"[DEBUG][load] Loaded optimizer with {len(opt_state['state'])} entries")
+                for k, v in opt_state["state"].items():
+                    for name, t in v.items():
+                        if isinstance(t, torch.Tensor):
+                            print_rank0(f"[DEBUG][load] Param {k} - {name}: device={t.device}, mean={t.float().mean().item():.6e}")
+                
 
         # waiting for all ranks to load checkpoint
         if self.DDP_enabled:

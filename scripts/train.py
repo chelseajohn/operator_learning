@@ -49,7 +49,7 @@ FourierNeuralOperator.TRAIN_DIR = args.trainDir
 FourierNeuralOperator.LOSSES_FILE = args.lossesFile
 FourierNeuralOperator.USE_TENSORBOARD = True if not args.disableTensorboard else False
 
-model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint)
+model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False)
 model.learn(args.epochs, args.saveInterval)
 
 if torch.distributed.is_initialized():
