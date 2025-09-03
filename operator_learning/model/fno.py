@@ -172,9 +172,9 @@ class FNO(nn.Module):
                 self.iZEnd = iZEnd
 
     def forward(self, x):
-        """ x[nBatch, nX, nY, nZ,  da] -> [nBatch, du, nX, nY, nZ] 
+        """ x[nBatch, da, nX, nY, nZ] -> [nBatch, du, nX, nY, nZ] 
             if use_subdomain_output:
-                x[nBatch, nX, nY, nZ,  da] -> [nBatch, du, iXEnd-iXBeg, iYEnd-iYBeg, iZEnd-iZBeg]
+                x[nBatch, da, nX, nY, nZ] -> [nBatch, du, iXEnd-iXBeg, iYEnd-iYBeg, iZEnd-iZBeg]
         """
 
        

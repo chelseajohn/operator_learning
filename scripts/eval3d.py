@@ -291,6 +291,7 @@ for iDec in range(len(decomps)):
     plt.tight_layout()
     errorPlot = f"run{run_id}_D{iDec}_error_over_time.{imgExt}"
     plt.savefig(f"{evalDir}/{errorPlot}")
+    plt.close()
 
     avgErr = err.mean(axis=0)
     avgErrId = errId.mean(axis=0)
@@ -304,11 +305,30 @@ for iDec in range(len(decomps)):
     xGrid = dataset.infos["xGrid"][:]
     yGrid = dataset.infos["yGrid"][:]
     zGrid = dataset.infos["zGrid"][:]
+    print(f'zGrid: {zGrid[0], zGrid[-1]}')
 
 
     uI = u0[0, 3].T
     uM = uPred[0, 3].T
     uR = uRef[0, 3].T
+
+    error_meanxy = np.mean(uPred[0, 3] - uRef[0, 3],axis=(0, 1))  # shape (32,)
+    z_levels = np.arange(uRef[0,3].shape[2])  # shape(32)
+
+    errorProfile = f"run{run_id}_D{iDec}_vertical_error_profile.{imgExt}"
+    plt.figure(figsize=(10, 5))
+    plt.scatter( z_levels[0],error_meanxy[0], color="red", s=100, zorder=5, label="Bottom boundary")
+    plt.scatter( z_levels[-1],error_meanxy[-1], color="blue", s=100, zorder=5, label="Top boundary")
+    plt.plot(z_levels,error_meanxy, marker='o')  
+    # plt.gca().invert_yaxis()
+    plt.ylabel("Error (x-y. avg.)")
+    plt.xlabel("Vertical Level (z)")
+    plt.title("Vertical Error Profile of (Model - pySDC)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.legend()
+    plt.savefig(f'{evalDir}/{errorProfile}')
+    plt.close()
 
     contourPlotSol = f"run{run_id}_D{iDec}_contour_solution.{imgExt}"
     contourPlot3D(
@@ -328,7 +348,7 @@ for iDec in range(len(decomps)):
     contourPlot3D(
         field=np.abs(uM-uR), 
         x=xGrid, y=yGrid,z=zGrid,
-        title="Error: |Model - PySDC|, Grid: "+subtitle,
+        title="Error: |Model - pySDC|, Grid: "+subtitle,
         saveFig=f"{evalDir}/{contourPlotErr}")
 
     if iDec == 0:
@@ -343,7 +363,7 @@ for iDec in range(len(decomps)):
         contourPlot3D(
             field=uR-uI, 
             x=xGrid, y=yGrid,z=zGrid,
-            title="Reference: PySDC",
+            title="Reference: pySDC",
             saveFig=f"{evalDir}/{contourPlotUpdateRef}")
         
     # -------------------------------------------------------------------------
@@ -370,6 +390,7 @@ for iDec in range(len(decomps)):
     plt.tight_layout()
     spectrumPlot = f"run{run_id}_D{iDec}_spectrum.{imgExt}"
     plt.savefig(f"{evalDir}/{spectrumPlot}")
+    plt.close()
 
     # -------------------------------------------------------------------------
     # -- Compute Nusselt Number
@@ -403,10 +424,13 @@ for iDec in range(len(decomps)):
     plt.tight_layout()
     nusPlot = f"run{run_id}_D{iDec}_nusPlot.{imgExt}"
     plt.savefig(f"{evalDir}/{nusPlot}")
+    plt.close()
 
     # -------------------------------------------------------------------------
     # -- Write slices evaluation in summary
     # -------------------------------------------------------------------------
+    if errorProfile is not None:
+        TEMPLATE += f"Vertical Error Profile :\n- [Vertical Error Profile]({errorProfile})\n\n"
     if nusPlot is not None:
         TEMPLATE += f"Nusselt Number :\n- [Nusselt Number Plot]({nusPlot})\n"
     summary.write(TEMPLATE.format(
@@ -424,6 +448,7 @@ for iDec in range(len(decomps)):
         contourPlotErr=contourPlotErr,
         contourPlotSolRef=contourPlotSolRef,
         contourPlotUpdateRef=contourPlotUpdateRef,
+        errorProfile=errorProfile,
         spectrumPlot=spectrumPlot,
         nusPlot=nusPlot
         ))
