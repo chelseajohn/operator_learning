@@ -33,6 +33,7 @@ class LpLoss(object):
         self.p = p
         self.reduction = reduction
         self.size_average = size_average
+        self.device = device
 
     def abs(self, x, y):
         num_examples = x.size()[0]
@@ -64,7 +65,7 @@ class LpLoss(object):
 
         return diff_norms/y_norms
 
-    def __call__(self, pred, ref, inp=None):
+    def __call__(self, pred, ref):
         return self.rel(pred, ref)
 
 @register
@@ -88,6 +89,7 @@ class VectorNormLoss(object):
         assert p > 0
         self.p = p
         self.dim = dim
+        self.device = device
         if absolute:
             self.__class__.__call__ = self.__class__.__call__ABS
         self.absolute = absolute
@@ -95,11 +97,11 @@ class VectorNormLoss(object):
     def vectorNorm(self, x):
         return torch.linalg.vector_norm(x, ord=self.p, dim=tuple(range(-self.dim, 0)))
     
-    def __call__(self, pred, ref, inp=None):
+    def __call__(self, pred, ref):
         refNorms = self.vectorNorm(ref)
         diffNorms = self.vectorNorm(pred-ref)
         return torch.mean(diffNorms/refNorms)
 
-    def __call__ABS(self, pred, ref, inp=None):
+    def __call__ABS(self, pred, ref):
         return torch.mean(self.vectorNorm(pred-ref))
 

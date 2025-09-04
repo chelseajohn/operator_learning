@@ -15,24 +15,37 @@ class FNOLayer(nn.Module):
                  bias=False,
                  n_dims=2,
                  use_skip_connection=False, 
+                 use_postfnochannel_mlp=False,
                  skip_type='linear'
                  ):
         super().__init__()
 
         self.conv = SpectralConv(dv=dv,kX=kX, kY=kY, kZ=kZ, bias=bias, order=n_dims)
+        self.use_skip_connection = use_skip_connection
+        self.use_postfnochannel_mlp= use_postfnochannel_mlp
+       
         if non_linearity == 'gelu':
             self.sigma = nn.functional.gelu
         else:
             self.sigma = nn.ReLU(inplace=True)
 
         if use_skip_connection:
-            self.W = SkipConnection(in_channel=dv,
-                                    out_channel=dv,
+            self.skip = SkipConnection(in_channel=dv,
+                                        out_channel=dv,
+                                        n_dims=n_dims,
+                                        skip_type=skip_type,
+                                        bias=bias)
+        
+        if self.use_postfnochannel_mlp:
+            self.channel_mlp = MLP(mode='channel',
+                                   n_layers=2,
                                     n_dims=n_dims,
-                                    skip_type=skip_type,
-                                    bias=bias)
-        else:
-            self.W = GridLinear(inSize=dv,
+                                    in_channels=dv,
+                                    out_channels=dv,
+                                    hidden_channels=2*dv
+                                )
+
+        self.W = GridLinear(inSize=dv,
                                 outSize=dv,
                                 hiddenSize=None,
                                 bias=bias,
@@ -45,10 +58,18 @@ class FNOLayer(nn.Module):
     def forward(self, x):
         """ x[nBatch, dv, nX, nY, (nZ)] -> [nBatch, dv, nX, nY, (nZ)] """
 
-        v = self.conv(x)    # Convolution
-        w = self.W(x)       # Linear operator
+        v = self.conv(x)                # Convolution
+        if self.use_postfnochannel_mlp: # MLP
+            v1 = self.channel_mlp(v)
+            v = v + v1
+            
+        w = self.W(x)                   # Linear operator
 
-        v += w
+        v = v + w
+        if self.use_skip_connection:     # skip
+            s = self.skip(x)
+            v = v + s
+
         o = self.sigma(v)
         return o
 
@@ -137,28 +158,29 @@ class FNO(nn.Module):
                           bias=bias,
                           n_dims=n_dims,
                           use_skip_connection=use_skip_connection,
+                          use_postfnochannel_mlp=use_postfnochannel_mlp,
                           skip_type=skip_type)
                  for _ in range(n_layers)])
 
 
-        if self.use_postfnochannel_mlp:
-            self.channel_mlp = nn.ModuleList(
-                                [MLP(mode='channel',
-                                    n_dims=n_dims,
-                                    n_layers=scaling_layers,
-                                    in_channels=dv,
-                                    out_channels=dv,
-                                    hidden_channels=round(dv/channel_mlp_expansion)
-                                    ) 
-                                for _ in range(n_layers)])
+        # if self.use_postfnochannel_mlp:
+        #     self.channel_mlp = nn.ModuleList(
+        #                         [MLP(mode='channel',
+        #                             n_dims=n_dims,
+        #                             n_layers=scaling_layers,
+        #                             in_channels=dv,
+        #                             out_channels=dv,
+        #                             hidden_channels=round(dv/channel_mlp_expansion)
+        #                             ) 
+        #                         for _ in range(n_layers)])
             
-            self.channel_mlp_skips = nn.ModuleList(
-                                        [SkipConnection(in_channel=dv,
-                                                        out_channel=dv,
-                                                        n_dims=n_dims,
-                                                        skip_type=skip_type,
-                                                        bias=bias)
-                                        for _ in range(n_layers)])
+        #     self.channel_mlp_skips = nn.ModuleList(
+        #                                 [SkipConnection(in_channel=dv,
+        #                                                 out_channel=dv,
+        #                                                 n_dims=n_dims,
+        #                                                 skip_type=skip_type,
+        #                                                 bias=bias)
+        #                                 for _ in range(n_layers)])
 
         self.memory = CudaMemoryDebugger(print_mem=True)
         self.get_subdomain_output = get_subdomain_output
@@ -184,15 +206,15 @@ class FNO(nn.Module):
             x = x.permute(0,1,3,2).to(torch.cfloat)
             
         for index,layer in enumerate(self.layers):
-            if self.use_postfnochannel_mlp:
-                x_skip_channel_mlp = self.channel_mlp_skips[index](x)
+            # if self.use_postfnochannel_mlp:
+            #     x_skip_channel_mlp = self.channel_mlp_skips[index](x)
 
             x = layer(x)
 
-            if self.use_postfnochannel_mlp:
-                 x = self.channel_mlp[index](x) + x_skip_channel_mlp
-                 if index < len(self.layers) - 1:
-                    x = nn.functional.gelu(x)
+            # if self.use_postfnochannel_mlp:
+            #      x = self.channel_mlp[index](x) + x_skip_channel_mlp
+            #      if index < len(self.layers) - 1:
+            #         x = nn.functional.gelu(x)
 
         if self.use_dse: 
             x = x.permute(0,1,3,2).real

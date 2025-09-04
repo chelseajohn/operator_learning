@@ -9,7 +9,7 @@ class SkipConnection(nn.Module):
     Args:
         in_channel (int): Number of input channels.
         out_channel (int): Number of output channels.
-        n_dim (int): Spatial dimensions (2 for Conv2D, 3 for Conv3D, etc).
+        n_dims (int): Spatial dimensions (2 for Conv2D, 3 for Conv3D, etc).
         skip_type (str): One of {'identity', 'linear', 'soft-gating'}.
         bias (bool): Include bias in linear/soft-gating transforms.
     """
@@ -17,7 +17,7 @@ class SkipConnection(nn.Module):
     def __init__(self, 
                 in_channel, 
                 out_channel,
-                n_dim=2,
+                n_dims=2,
                 skip_type="soft-gating",
                 bias=False):
         super().__init__()
@@ -36,7 +36,7 @@ class SkipConnection(nn.Module):
                     f"Soft-gating requires in_channel == out_channel, "
                     f"but got {in_channel} != {out_channel}"
                 )
-            shape = (1, in_channel) + (1,) * n_dim  # e.g., (1, C, 1, 1) for 2D
+            shape = (1, in_channel) + (1,) * n_dims  # e.g., (1, C, 1, 1) for 2D
             self.weight = nn.Parameter(torch.ones(shape))
             self.bias = nn.Parameter(torch.ones(shape)) if bias else None
 

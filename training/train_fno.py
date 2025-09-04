@@ -77,8 +77,8 @@ class FourierNeuralOperator:
         if loss_class is None:
             raise NotImplementedError(f"Unknown loss type, available are {list(LOSSES_CLASSES.keys())}")
 
-        if "grids" in loss:
-            loss["grids"] = self.dataset.grid
+        # if "grids" in loss:
+        #     loss["grids"] = self.dataset.grid
         self.lossFunction = loss_class(**loss, device=self.device)
         self.lossConfig = loss
 
@@ -161,9 +161,9 @@ class FourierNeuralOperator:
                 else:
                     inputs, outputs = next(data_iter)
                 if self.outType == "solution":
-                    loss = self.lossFunction(inputs, outputs, inputs)
+                    loss = self.lossFunction(inputs, outputs)
                 elif self.outType == "update":
-                    loss = self.lossFunction(torch.zeros_like(inputs), outputs, inputs)
+                    loss = self.lossFunction(torch.zeros_like(inputs), outputs)
                 else:
                     raise ValueError(f"Invalid outType: {self.outType}")
                 total_loss += loss.item()
@@ -178,9 +178,9 @@ class FourierNeuralOperator:
         optimizer = self.optimizer
         scheduler = self.lr_scheduler
 
-        nSamples = len(self.trainLoader.dataset)
+        # nSamples = len(self.trainLoader.dataset)
         nBatches = len(self.trainLoader)
-        batchSize = self.trainLoader.batch_size
+        # batchSize = self.trainLoader.batch_size
         data_iter = iter(self.trainLoader)
         total_loss = 0.0
         gradsEpoch = 0.0
@@ -190,7 +190,7 @@ class FourierNeuralOperator:
             # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, 4, nX, ny]
             inp_list, out_list = next(data_iter)
             nBatches = len(inp_list)
-            batchSize = len(inp_list[0])
+            # batchSize = len(inp_list[0])
 
         for iBatch in range(nBatches):
             if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
@@ -201,7 +201,7 @@ class FourierNeuralOperator:
             ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
 
             pred = model(inp)
-            loss = self.lossFunction(pred, ref, inp)
+            loss = self.lossFunction(pred, ref)
 
             optimizer.zero_grad()
             if self.debug:
@@ -276,7 +276,7 @@ class FourierNeuralOperator:
     def valid(self):
         model = self.model.eval()
         nBatches = len(self.valLoader)
-        batchSize = self.valLoader.batch_size
+        # batchSize = self.valLoader.batch_size
         total_loss = 0.0
         idLoss = self.losses['id']['valid']
         data_iter = iter(self.valLoader)
@@ -285,7 +285,7 @@ class FourierNeuralOperator:
             # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, 4, nX, ny]
             inp_list, out_list = next(data_iter) 
             nBatches = len(inp_list)
-            batchSize = len(inp_list[0])
+            # batchSize = len(inp_list[0])
 
         with torch.no_grad():
             for iBatch in range(nBatches):
@@ -296,7 +296,7 @@ class FourierNeuralOperator:
                 inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                 ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
                 pred = model(inp)
-                loss = self.lossFunction(pred,ref, inp)
+                loss = self.lossFunction(pred,ref)
                 total_loss += loss.item()
 
         avg_loss = total_loss / nBatches
