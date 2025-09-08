@@ -312,22 +312,47 @@ for iDec in range(len(decomps)):
     uM = uPred[0, 3].T
     uR = uRef[0, 3].T
 
-    error_meanxy = np.mean(uPred[0, 3] - uRef[0, 3],axis=(0, 1))  # shape (32,)
-    z_levels = np.arange(uRef[0,3].shape[2])  # shape(32)
+    error_meanxy = np.mean(uPred[0, 3] - uRef[0, 3], axis=(0, 1))  # z-shape
+    error_meanxz = np.mean(uPred[0, 3] - uRef[0, 3], axis=(0, 2))  # y-shape
+    error_meanyz = np.mean(uPred[0, 3] - uRef[0, 3], axis=(1, 2))  # x-shape
 
-    errorProfile = f"run{run_id}_D{iDec}_vertical_error_profile.{imgExt}"
+    errorProfileZ = f"run{run_id}_D{iDec}_error_profileZ.{imgExt}"
     plt.figure(figsize=(10, 5))
-    plt.scatter( z_levels[0],error_meanxy[0], color="red", s=100, zorder=5, label="Bottom boundary")
-    plt.scatter( z_levels[-1],error_meanxy[-1], color="blue", s=100, zorder=5, label="Top boundary")
-    plt.plot(z_levels,error_meanxy, marker='o')  
+    plt.scatter(zGrid[-1], error_meanxy[-1], color="red", s=100, zorder=5, label="Bottom boundary")
+    plt.scatter(zGrid[0], error_meanxy[0], color="blue", s=100, zorder=5, label="Top boundary")
+    plt.plot(zGrid, error_meanxy, marker='o')  
     # plt.gca().invert_yaxis()
     plt.ylabel("Error (x-y. avg.)")
     plt.xlabel("Vertical Level (z)")
-    plt.title("Vertical Error Profile of (Model - pySDC)")
+    plt.title("Error Profile along Z (Model - pySDC)")
     plt.grid(True)
     plt.tight_layout()
     plt.legend()
-    plt.savefig(f'{evalDir}/{errorProfile}')
+    plt.savefig(f'{evalDir}/{errorProfileZ}')
+    plt.close()
+
+    errorProfileY = f"run{run_id}_D{iDec}_error_profileY.{imgExt}"
+    plt.figure(figsize=(10, 5))
+    plt.plot(yGrid, error_meanxz, marker='o')  
+    # plt.gca().invert_yaxis()
+    plt.ylabel("Error (x-z. avg.)")
+    plt.xlabel("Vertical Level (y)")
+    plt.title("Error Profile along Y (Model - pySDC)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f'{evalDir}/{errorProfileY}')
+    plt.close()
+
+    errorProfileX = f"run{run_id}_D{iDec}_error_profileX.{imgExt}"
+    plt.figure(figsize=(10, 5))
+    plt.plot(xGrid, error_meanyz, marker='o')  
+    # plt.gca().invert_yaxis()
+    plt.ylabel("Error (y-z. avg.)")
+    plt.xlabel("Vertical Level (x)")
+    plt.title("Error Profile along X (Model - pySDC)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f'{evalDir}/{errorProfileX}')
     plt.close()
 
     contourPlotSol = f"run{run_id}_D{iDec}_contour_solution.{imgExt}"
@@ -429,8 +454,10 @@ for iDec in range(len(decomps)):
     # -------------------------------------------------------------------------
     # -- Write slices evaluation in summary
     # -------------------------------------------------------------------------
-    if errorProfile is not None:
-        TEMPLATE += f"Vertical Error Profile :\n- [Vertical Error Profile]({errorProfile})\n\n"
+    if errorProfileX is not None:
+        TEMPLATE += f"Error Profile (X) :\n- [Error ProfileX]({errorProfileX})\n"
+        TEMPLATE += f"Error Profile (Y) :\n- [Error ProfileY]({errorProfileY})\n"
+        TEMPLATE += f"Error Profile (Z) :\n- [Error ProfileZ]({errorProfileZ})\n\n"
     if nusPlot is not None:
         TEMPLATE += f"Nusselt Number :\n- [Nusselt Number Plot]({nusPlot})\n"
     summary.write(TEMPLATE.format(
@@ -448,7 +475,9 @@ for iDec in range(len(decomps)):
         contourPlotErr=contourPlotErr,
         contourPlotSolRef=contourPlotSolRef,
         contourPlotUpdateRef=contourPlotUpdateRef,
-        errorProfile=errorProfile,
+        errorProfileX=errorProfileX,
+        errorProfileY=errorProfileY,
+        errorProfileZ=errorProfileZ,
         spectrumPlot=spectrumPlot,
         nusPlot=nusPlot
         ))
