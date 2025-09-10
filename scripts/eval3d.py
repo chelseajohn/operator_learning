@@ -312,9 +312,10 @@ for iDec in range(len(decomps)):
     uM = uPred[0, 3].T
     uR = uRef[0, 3].T
 
-    error_meanxy = np.mean(uPred[0, 3] - uRef[0, 3], axis=(0, 1))  # z-shape
-    error_meanxz = np.mean(uPred[0, 3] - uRef[0, 3], axis=(0, 2))  # y-shape
-    error_meanyz = np.mean(uPred[0, 3] - uRef[0, 3], axis=(1, 2))  # x-shape
+    error_meanxy = np.mean(uPred[0, 3] - uRef[0, 3], axis=(0, 1)) / np.mean(uRef[0, 3], axis=(0, 1)) # z-shape
+    error_meanxz = np.mean(uPred[0, 3] - uRef[0, 3], axis=(0, 2)) / np.mean(uRef[0, 3], axis=(0, 2)) # y-shape
+    error_meanyz = np.mean(uPred[0, 3] - uRef[0, 3], axis=(1, 2)) / np.mean(uRef[0, 3], axis=(1, 2)) # x-shape
+
 
     errorProfileZ = f"run{run_id}_D{iDec}_error_profileZ.{imgExt}"
     plt.figure(figsize=(10, 5))
@@ -322,9 +323,9 @@ for iDec in range(len(decomps)):
     plt.scatter(zGrid[0], error_meanxy[0], color="blue", s=100, zorder=5, label="Top boundary")
     plt.plot(zGrid, error_meanxy, marker='o')  
     # plt.gca().invert_yaxis()
-    plt.ylabel("Error (x-y. avg.)")
+    plt.ylabel("RelError (x-y. avg.)")
     plt.xlabel("Vertical Level (z)")
-    plt.title("Error Profile along Z (Model - pySDC)")
+    plt.title(r"Relative Error Profile along Z $\left(\frac{\mathrm{Model - pySDC}}{\mathrm{pySDC}}\right)$")
     plt.grid(True)
     plt.tight_layout()
     plt.legend()
@@ -335,9 +336,9 @@ for iDec in range(len(decomps)):
     plt.figure(figsize=(10, 5))
     plt.plot(yGrid, error_meanxz, marker='o')  
     # plt.gca().invert_yaxis()
-    plt.ylabel("Error (x-z. avg.)")
+    plt.ylabel("RelError (x-z. avg.)")
     plt.xlabel("Vertical Level (y)")
-    plt.title("Error Profile along Y (Model - pySDC)")
+    plt.title(r"Relative Error Profile along Y $\left(\frac{\mathrm{Model - pySDC}}{\mathrm{pySDC}}\right)$")
     plt.grid(True)
     plt.tight_layout()
     plt.savefig(f'{evalDir}/{errorProfileY}')
@@ -347,9 +348,9 @@ for iDec in range(len(decomps)):
     plt.figure(figsize=(10, 5))
     plt.plot(xGrid, error_meanyz, marker='o')  
     # plt.gca().invert_yaxis()
-    plt.ylabel("Error (y-z. avg.)")
+    plt.ylabel("RelError (y-z. avg.)")
     plt.xlabel("Vertical Level (x)")
-    plt.title("Error Profile along X (Model - pySDC)")
+    plt.title(r"Relative Error Profile along X $\left(\frac{\mathrm{Model - pySDC}}{\mathrm{pySDC}}\right)$")
     plt.grid(True)
     plt.tight_layout()
     plt.savefig(f'{evalDir}/{errorProfileX}')
@@ -455,9 +456,9 @@ for iDec in range(len(decomps)):
     # -- Write slices evaluation in summary
     # -------------------------------------------------------------------------
     if errorProfileX is not None:
-        TEMPLATE += f"Error Profile (X) :\n- [Error ProfileX]({errorProfileX})\n"
-        TEMPLATE += f"Error Profile (Y) :\n- [Error ProfileY]({errorProfileY})\n"
-        TEMPLATE += f"Error Profile (Z) :\n- [Error ProfileZ]({errorProfileZ})\n\n"
+        TEMPLATE += f"Relative Error Profile(X) :\n- [Error ProfileX]({errorProfileX})\n"
+        TEMPLATE += f"Relative Error Profile(Y) :\n- [Error ProfileY]({errorProfileY})\n"
+        TEMPLATE += f"Relative Error Profile(Z) :\n- [Error ProfileZ]({errorProfileZ})\n\n"
     if nusPlot is not None:
         TEMPLATE += f"Nusselt Number :\n- [Nusselt Number Plot]({nusPlot})\n"
     summary.write(TEMPLATE.format(
