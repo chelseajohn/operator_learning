@@ -57,11 +57,12 @@ class FourierNeuralOperator:
         self.xStep = data.pop("xStep", 1)
         self.yStep = data.pop("yStep", 1)
         self.zStep = data.pop("zStep", 1)
-        data.pop("outType", None)
-        data.pop("outScaling", None)
+        data.pop("outType", 'solution')
+        data.pop("outScaling", 1.0)
         self.use_domain_sampling = True if self.data_config['sampling_mode'] is not None else False  # only for 2D
+        self.dataClass = data['dataClass']
 
-        # sample : [batchSize, 4(5), nX, nY, (nZ)]
+        # sample : [batchSize, channel, nX, nY, (nZ)]
         self.trainLoader, self.valLoader, self.dataset = getDataLoaders(**data,kX=model['kX'], kY=model['kY'], kZ=model['kZ'])
         self.outType = self.dataset.outType
         self.outScaling = self.dataset.outScaling
@@ -83,10 +84,15 @@ class FourierNeuralOperator:
         self.lossConfig = loss
 
         # Loss tracking
-        self.losses = {
-            "model": {"valid": -1, "train": -1},
-            "id": {"valid": self.idLoss("valid"), "train": self.idLoss("train")},
-        }
+        if self.dataClass == 'rbc':
+            self.losses = {
+                "model": {"valid": -1, "train": -1},
+                "id": {"valid": self.idLoss("valid"), "train": self.idLoss("train")},
+            }
+        else:
+            self.losses = {
+                "model": {"valid": -1, "train": -1}
+            }
         
         print_rank0("### Model Infos ###")
         
@@ -106,7 +112,7 @@ class FourierNeuralOperator:
     # Setup and utility methods
     # -------------------------------------------------------------------------
     def setupModel(self, model_config):
-        self.model = FNO(**model_config).to(self.device)
+        self.model = FNO(**model_config, dataset=self.dataset).to(self.device)
         self.modelConfig = model_config.copy()
         print_rank0(self.modelConfig)
         model_df = self.model.print_size()
@@ -150,7 +156,7 @@ class FourierNeuralOperator:
         data_iter = iter(loader)
 
         if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
-            # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, 4, nX, ny]
+            # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, channel, nX, ny]
             inp_list, out_list = next(data_iter)  
             nBatches = len(inp_list)
 
@@ -184,10 +190,13 @@ class FourierNeuralOperator:
         data_iter = iter(self.trainLoader)
         total_loss = 0.0
         gradsEpoch = 0.0
-        idLoss = self.losses['id']['train']
+        if self.dataClass == 'rbc':
+            idLoss = self.losses['id']['train']
+        else:
+            idLoss = 0.0    # not relevant
 
         if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:  # only for 2D
-            # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, 4, nX, ny]
+            # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, channel, nX, ny]
             inp_list, out_list = next(data_iter)
             nBatches = len(inp_list)
             # batchSize = len(inp_list[0])
@@ -278,11 +287,14 @@ class FourierNeuralOperator:
         nBatches = len(self.valLoader)
         # batchSize = self.valLoader.batch_size
         total_loss = 0.0
-        idLoss = self.losses['id']['valid']
         data_iter = iter(self.valLoader)
+        if self.dataClass == 'rbc':
+           idLoss = self.losses['id']['valid']
+        else:
+            idLoss = 0.0 # not relevant
 
         if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:  # only for 2D
-            # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, 4, nX, ny]
+            # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, channel, nX, ny]
             inp_list, out_list = next(data_iter) 
             nBatches = len(inp_list)
             # batchSize = len(inp_list[0])
@@ -341,20 +353,37 @@ class FourierNeuralOperator:
         if self.USE_TENSORBOARD and self.rank == 0:
             self.writer.add_scalars("Losses", {
                 "Train": self.losses["model"]["train"],
-                "Valid": self.losses["model"]["valid"],
-                "Train_id": self.losses["id"]["train"],
-                "Valid_id": self.losses["id"]["valid"]
+                "Valid": self.losses["model"]["valid"]
             }, self.epochs)
+            if self.dataClass == 'rbc':
+                self.writer.add_scalars('IdLoss',{
+                    "Train_id": self.losses["id"]["train"],
+                    "Valid_id": self.losses["id"]["valid"]
+                }, self.epochs)
             self.writer.add_scalar("Gradients/NormEpoch", self.gradientNormEpoch, self.epochs)
             self.writer.flush()
 
         if self.LOSSES_FILE and self.rank == 0:
             with open(self.fullPath(self.LOSSES_FILE), "a") as f:
-                f.write("{epochs}\t{train:1.18f}\t{valid:1.18f}\t{train_id:1.18f}\t{valid_id:1.18f}\t{gradNorm:1.18f}\t{tComp}\n".format(
-                    epochs=self.epochs,
-                    train_id=self.losses["id"]["train"], valid_id=self.losses["id"]["valid"],
-                    gradNorm=self.gradientNormEpoch, tComp=self.tCompEpoch, **self.losses["model"]))
-    
+                line = "{epochs}\t{train:1.18f}\t{valid:1.18f}\t{gradNorm:1.18f}\t{tComp}\n"
+                format_dict = {
+                    "epochs": self.epochs,
+                    "train": self.losses["model"]["train"],
+                    "valid": self.losses["model"]["valid"],
+                    "gradNorm": self.gradientNormEpoch,
+                    "tComp": self.tCompEpoch
+                }
+
+                if self.dataClass == "rbc":
+                    line = "{epochs}\t{train:1.18f}\t{valid:1.18f}\t{train_id:1.18f}\t{valid_id:1.18f}\t{gradNorm:1.18f}\t{tComp}\n"
+                    format_dict.update({
+                        "train_id": self.losses["id"]["train"],
+                        "valid_id": self.losses["id"]["valid"]
+                    })
+
+                f.write(line.format(**format_dict))
+
+                
     def save(self, filename):
         path = self.fullPath(filename)
         checkpoint = {

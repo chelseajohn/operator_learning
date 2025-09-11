@@ -158,7 +158,6 @@ class PySDCReader:
             print(" -- done !")
         return out
 
-
 def createDatasetFromPySDC(
     dataDir: str,
     inSize: int,

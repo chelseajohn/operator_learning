@@ -6,7 +6,7 @@ base_path = Path(__file__).resolve().parents[4]
 sys.path.append(str(base_path))
 import argparse
 from operator_learning.utils.misc import readConfig
-from operator_learning.data.hdf5_dataset import createDataset
+from operator_learning.data.hdf5_dataset import createDatasetFromDedalus
 
 
 # -----------------------------------------------------------------------------
@@ -62,4 +62,4 @@ if kwargs.get("iEnd", None) is None: kwargs.pop("iEnd", None)
 # -----------------------------------------------------------------------------
 # Script execution
 # -----------------------------------------------------------------------------
-createDataset(**kwargs)
+createDatasetFromDedalus(**kwargs)

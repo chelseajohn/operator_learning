@@ -1,0 +1,89 @@
+simu:
+  picFile: electrostatic_plasma1D.h5
+  nDim: 1
+
+sample:
+  iEnd: 200
+  step: 1
+
+data:
+  dataClass: pic
+  outType: solution
+  outScaling: 1
+  space_dim: 1
+  xStep: 1
+  yStep: 1
+  zStep: 1
+  seed: null
+  dataFile: pic_electrostatic_plasma1D.h5
+  trainRatio: 0.8
+  batchSize: 20
+  sampling_mode: None  # [fixed, ordered, random]
+  pad_to_fullGrid: false
+  use_fixedPatch_startIdx: false
+  nPatch_per_sample: 1
+  use_minLimit: false
+  padding : [0,0,0,0]
+  add_fullGrid: false
+  # slices: 
+  # patch_startIdx: 
+
+model:
+  da: 2
+  du: 1
+  dv: 32
+  kX: 16
+  kY: None
+  kZ: None
+  n_dims: 1
+  n_layers: 4
+  bias: false
+  non_linearity: gelu
+  scaling_layers: 2
+  use_prechannel_mlp: true
+  use_postfnochannel_mlp: false
+  channel_mlp_expansion: 4
+  use_skip_connection: false
+  skip_type: soft-gating
+  use_dse: false
+  get_subdomain_output: false             # set to true only for inference
+  iXBeg: 0
+  iYBeg: 0
+  iXEnd: 0
+  iYEnd: 0
+
+optim:
+  name: adam
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+
+lr_scheduler:
+  # scheduler: CosAnnealingLR
+  # T_max: 50000
+  scheduler: StepLR
+  step_size: 50.0
+  gamma: 0.5
+
+loss:
+  name: L1Loss
+  # absolute: false
+  
+parallel_strategy:
+  ddp: false                     # Distributed Data Parallel
+  gpus_per_node: 4
+
+train:
+  trainDir: trainDir
+  epochs: 100                     # nEpochs
+  checkpoint: None
+  saveInterval: 50
+  disableTensorboard: false
+
+eval:
+  iSimu: 0
+  runId: 1
+  imgExt: png
+  evalDir: eval1D
+  tSteps: 1
+
+ 

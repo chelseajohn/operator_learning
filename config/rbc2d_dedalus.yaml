@@ -16,6 +16,7 @@ sample:
   inStep: 500    # slice interval
 
 data:
+  dataClass: rbc
   outType: update
   outScaling: 1000
   space_dim: 2
@@ -77,12 +78,12 @@ loss:
   absolute: false
   
 parallel_strategy:
-  ddp: false    # Distributed Data Parallel
+  ddp: false                             # Distributed Data Parallel
   gpus_per_node: 4
 
 train:
   trainDir: trainDir
-  epochs: 10
+  epochs: 10                             # nEpochs
   checkpoint: model.pt
   saveInterval: 5
   disableTensorboard: false

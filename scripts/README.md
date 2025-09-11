@@ -1,11 +1,11 @@
 # Overview
 
-The scripts facilitate training FNO models on Rayleigh-Bénard convection and comprehensive evaluation of trained models with visualization and analysis capabilities.
+The scripts facilitate training FNO models and comprehensive evaluation of trained models with visualization and analysis capabilities.
 
 ## Scripts Description
 
 ### `train.py`
-Main training script for 2D/3D Fourier Neural Operator models.
+Main training script for 1D/2D/3D Fourier Neural Operator models.
 
 **Features:**
 - Supports distributed training with PyTorch
@@ -28,8 +28,8 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--disableTensorboard`: Disable Tensorboard logging
 - `--lossesFile`: File to write loss values
 
-### `eval{2d,3d}.py`
-Comprehensive evaluation script for trained FNO models with detailed analysis and visualization.
+###  `rbc_eval/eval{2d,3d}.py`
+Comprehensive evaluation script for trained FNO models with detailed analysis and visualization for Rayleigh Benard Convection
 
 **Features:**
 - Multi-timestep autoregressive evaluation
@@ -59,23 +59,7 @@ python eval{2d,3d}.py --checkpoint model.pt --dataFile dataset.h5 --tSteps 10
 - `--config`: Configuration file for evaluation parameters
 
 ### `eval_template.md`
-Markdown template for evaluation report generation. Used internally by `eval_{2d,3d}.py` to structure the evaluation results.
-
-### Evaluation Outputs 
-```
-evalDir/
-├── eval_run{runId}.md                    # Evaluation report
-├── run{runId}_D{iDec}_error_over_time.png
-├── run{runId}_D{iDec}_contour_solution.png
-├── run{runId}_D{iDec}_contour_update.png
-├── run{runId}_D{iDec}_contour_err.png
-├── run{runId}_D{iDec}_contour_ref_solution.png
-├── run{runId}_D{iDec}_contour_ref_update.png
-├── run{runId}_D{iDec}_spectrum.png
-├── run{runId}_D{iDec}_spectrum_HF.png (only for 2D)
-└── run{runId}_D{iDec}_nusPlot.png (only for 3D)
-
-```
+Markdown template for evaluation report generation. 
 
 ## Dataset Requirements
 
@@ -83,5 +67,5 @@ The scripts work with HDF5 datasets containing:
 - `inputs`: Initial conditions for simulations
 - `outputs`: Target solutions or updates
 - `infos`: Metadata including grid information, timesteps, and dataset parameters
-- `xGrid`, `yGrid`: Spatial grid coordinates
+- `xGrid`, `yGrid`: Spatial grid coordinates (if available)
 

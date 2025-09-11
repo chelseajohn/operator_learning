@@ -2,7 +2,8 @@ import torch
 from torch.utils.data import  DataLoader, random_split, Subset
 from torch.utils.data.distributed import DistributedSampler
 from collections import defaultdict
-from operator_learning.data.hdf5_dataset import HDF5Dataset, DomainDataset
+from operator_learning.data.hdf5_dataset import RBCDataset, DomainDataset
+from operator_learning.data.pic_dataset import PICDataset
 from operator_learning.utils.communication import get_world_size, get_rank
 
 def variable_tensor_collate_fn(batch):
@@ -44,7 +45,8 @@ def variable_tensor_collate_fn(batch):
 
 def getDataLoaders(dataFile,
                    trainRatio=0.8, 
-                   batchSize=20, seed=None, 
+                   batchSize=20,
+                   seed=None, 
                    sampling_mode=None,
                    pad_to_fullGrid=False,
                    use_fixedPatch_startIdx=False,
@@ -71,8 +73,13 @@ def getDataLoaders(dataFile,
             if use_fixedPatch_startIdx and not sampling_mode == 'ordered':
                 dataset.patch_startIdx.append((0,0))
     else:
-        dataset = HDF5Dataset(dataFile, **kwargs)
+        if kwargs.get('dataClass') == 'pic':
+            dataset = PICDataset(dataFile, **kwargs)
+        else:
+            dataset = RBCDataset(dataFile, **kwargs)
 
+    if kwargs.get('datasetOnly', False):
+        return dataset
 
     dataset.printInfos()
     

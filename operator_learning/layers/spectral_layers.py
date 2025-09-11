@@ -8,24 +8,24 @@ class SpectralConv(nn.Module):
 
     Args:
         dv (int): channels
-        kX, kY, kZ (int): Fourier modes (Z only for 3D)
+        kX, kY, kZ (int): Fourier modes 
         bias (bool): bias for Fourier layer. Default is False.
-        order (int): spatial dim (2 or 3). Default is 2.
+        dim (int): spatial dim (1, 2 or 3). Default is 2.
 
   
     """
     def __init__(self, 
                  dv, 
                  kX, 
-                 kY,
+                 kY=None,
                  kZ=None,
                  bias=False,
-                 order=2
+                 dim=2
     ):
         super().__init__()
 
-        assert order in (2, 3), "Only 2D or 3D supported"
-        self.order = order
+        assert dim in (1,2, 3), "Only till 3D supported"
+        self.dim = dim
         self.dv = dv
         # Number of Fourier modes to multiply, at most floor(N/2) + 1
         # k_max = 12 in http://arxiv.org/pdf/2010.08895
@@ -34,7 +34,11 @@ class SpectralConv(nn.Module):
         self.kZ = kZ 
 
         # R
-        if order == 2:
+        if dim ==1:
+            operator_weights = torch.rand(dv, dv, kX, dtype=torch.cfloat)
+
+        elif dim == 2:
+            assert kY is not None, "kY must be specified for 2D simulations"
             operator_weights = torch.rand(dv, dv, 2 * kX , kY, dtype=torch.cfloat)
             
         else:
@@ -44,26 +48,22 @@ class SpectralConv(nn.Module):
 
 
         if bias:
-            if order == 2:
-                self.init_std = (2 / (dv + dv))**0.5
-            else:
-                self.init_std = (2/ (dv + dv + dv))**0.5
+            init_std = (2/ (dv * dim))**0.5
             self.bias = nn.Parameter(
-                self.init_std * torch.randn(*(tuple([dv]) + (1,) * order))
+                init_std * torch.randn(*(tuple([dv]) + (1,) * dim))
             )
         else:
-            self.init_std = None
             self.bias = None
 
     def T(self, kMax, n, device, sym=False):
         T = torch.cat([
             torch.eye(kMax, dtype=torch.cfloat),        # Top-left identity
-            torch.zeros(kMax, n - kMax)                 # Zero-pad to match n columns
+            torch.zeros(kMax, n - kMax, dtype=torch.cfloat)                 # Zero-pad to match n columns
         ], dim=1)                                       # Shape: [kMax, n]
 
         if sym:
             Tinv = torch.cat([
-                torch.zeros(kMax, n - kMax),            # Zero-pad on the left
+                torch.zeros(kMax, n - kMax, dtype=torch.cfloat),            # Zero-pad on the left
                 torch.eye(kMax, dtype=torch.cfloat)     # Bottom-right identity
             ], dim=1)                                   # Shape: [kMax, n]
             
@@ -73,10 +73,13 @@ class SpectralConv(nn.Module):
 
     def _toFourierSpace(self, x):
         """ 
+        x[nBatch, dv, nX] -> [nBatch, dv, fX = nX/2+1]
         x[nBatch, dv, nX, nY] -> [nBatch, dv, fX = nX, fY = nY/2+1]
         x[nBatch, dv, nX, nY, nZ] -> [nBatch, dv, fX = nX, fY = nY, fZ = nZ/2+1]
         """
-        if self.order == 2:
+        if self.dim == 1:
+            x = torch.fft.rfft(x, dim=-1, norm="ortho")
+        elif self.dim == 2:
             x = torch.fft.rfftn(x, dim=(-2,-1), norm="ortho")   # RFFT on last 2 dimensions
         else:
             x = torch.fft.rfftn(x, dim=(-3,-2,-1), norm="ortho")   # RFFT on last 3 dimensions
@@ -84,10 +87,13 @@ class SpectralConv(nn.Module):
 
     def _toRealSpace(self, x, org_size):
         """ 
+        x[nBatch, dv, fX = nX/2+1] -> [nBatch, dv, nX]
         x[nBatch, dv, fX = nX, fY = nY/2+1] -> [nBatch, dv, nX, nY]
         x[nBatch, dv, fX = nX, fY = nY, fZ = nZ/2+1] -> [nBatch, dv, nX, nY, nZ]
         """
-        if self.order == 2:
+        if self.dim == 1:
+            x = torch.fft.irfft(x, n=org_size[-1], dim=-1, norm="ortho")
+        elif self.dim == 2:
             x = torch.fft.irfftn(x, s=org_size, dim=(-2,-1), norm="ortho")  # IRFFT on last 2 dimensions
         else:
             x = torch.fft.irfftn(x, s=org_size, dim=(-3,-2,-1), norm="ortho")  # IRFFT on last 3 dimensions
@@ -96,16 +102,28 @@ class SpectralConv(nn.Module):
 
     def forward(self, x:torch.tensor):
         """ x[nBatch, dv, nX, nY, ..] -> [nBatch, dv, nX, nY, ..] """
-        org_size = x.shape[-self.order:]
+        org_size = x.shape[-self.dim:]
         # Transform to Fourier space -> [nBatch, dv, fX, fY,..]
         x = self._toFourierSpace(x)
-        # Truncate and keep only first modes -> [nBatch, dv, kX, kY,..]
-        f_dims = x.shape[-self.order:]
+        f_dims = x.shape[-self.dim:]
 
-        Tx = self.T(self.kX, f_dims[0], x.device, sym=True)
+      
+        if self.dim == 1:
+            Tx = self.T(self.kX, f_dims[0], x.device, sym=False)
+            # -- Tx[kX, fX]
+            x = torch.einsum("ax,eix->eia", Tx, x)   
 
-        if self.order == 2:
+            # Apply R[dv, dv, kX] -> [nBatch, dv, kX]
+            R = deformat_complexTensor(self.R).to(x.device)       
+            x = torch.einsum("ija,eja->eia", R, x)   
+            
+            # Padding on high frequency modes -> [nBatch, dv, fX]
+            x = torch.einsum("xa,eia->eix", Tx.T, x)      
+
+        elif self.dim == 2:
+            Tx = self.T(self.kX, f_dims[0], x.device, sym=True)
             Ty = self.T(self.kY, f_dims[1], x.device)
+            # Truncate and keep only first modes -> [nBatch, dv, kX, kY,..]
             # -- Tx[kX, fX], Ty[kY, fY]
             x = torch.einsum("ax,by,eixy->eiab", Tx, Ty, x)
 
@@ -117,7 +135,8 @@ class SpectralConv(nn.Module):
             x = torch.einsum("xa,yb,eiab->eixy", Tx.T, Ty.T, x)
 
         else:
-            Ty = self.T(self.kY, f_dims[1], x.device, sym = True)
+            Tx = self.T(self.kX, f_dims[0], x.device, sym=True)
+            Ty = self.T(self.kY, f_dims[1], x.device, sym=True)
             Tz = self.T(self.kZ, f_dims[2], x.device)
             # -- Tx[kX, fX], Ty[kY, fY], Tz[kZ, fZ]
             x = torch.einsum("ax,by,cz,ejxyz->ejabc", Tx, Ty, Tz, x)
