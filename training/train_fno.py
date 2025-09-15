@@ -22,9 +22,12 @@ class FourierNeuralOperator:
 
     def __init__(self, data:dict=None, model:dict=None, optim:dict=None, 
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
-                loss:dict=None, checkpoint=None, eval_only=False, debug=False):
+                loss:dict=None, checkpoint=None, eval_only=False, debug=False, device=None):
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = device
         self.rank = int(os.getenv('RANK', '0'))
         self.world_size = int(os.getenv('WORLD_SIZE', '1'))
         self.debug = debug

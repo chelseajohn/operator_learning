@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys
+from pathlib import Path
+base_path = Path(__file__).resolve().parents[1]
+sys.path.append(str(base_path))
+import numpy as np
+
+def f(x: float, alpha: float, kd: float, u: float) -> float:
+    """
+    Evaluate the nonlinear transformation function for inverse sampling.
+
+    Args:
+        x (float): Current guess.
+        alpha (float): Amplitude parameter.
+        kd (float): Wave number.
+        u (float): Uniform random variable mapped to [0, L].
+
+    Returns:
+        float: Value of the function f(x) = x + alpha * sin(kd*x)/kd - u.
+    """
+    return x + (alpha * (np.sin(kd * x) / kd)) - u
+
+
+def fprime(x: float, alpha: float, kd: float) -> float:
+    """
+    Evaluate the derivative of the nonlinear transformation function.
+
+    Args:
+        x (float): Current guess.
+        alpha (float): Amplitude parameter.
+        kd (float): Wave number.
+
+    Returns:
+        float: Derivative f'(x) = 1 + alpha * cos(kd*x).
+    """
+    return 1 + (alpha * np.cos(kd * x))
+
+
+def Newton1d(xi: float, alpha: float, kd: float, u: float) -> tuple[float, int]:
+    """
+    Solve f(x) = 0 using Newton-Raphson iteration in 1D.
+
+    Args:
+        xi (float): Initial guess for x.
+        alpha (float): Amplitude parameter.
+        kd (float): Wave number.
+        u (float): Target value for the transformation.
+
+    Returns:
+        x (float): Root of f(x) = 0.
+        k (int): Number of iterations performed.
+
+    Raises:
+        RuntimeError: If maximum number of iterations is reached without convergence.
+    """
+    tol = 1e-12
+    max_iter = 20
+    k = 0
+    x = xi
+    while (k <= max_iter) and (np.abs(f(x, alpha, kd, u)) > tol):
+        x = x - f(x, alpha, kd, u) / fprime(x, alpha, kd)
+        k += 1
+    if k == max_iter:
+        raise RuntimeError("Newton iterations did not converge")
+    return x, k
+
+
+def InvTransSampling(alpha: float, k: float, L: float, N: int) -> np.ndarray:
+    """
+    Generate particle positions using inverse transform sampling for a sinusoidal perturbation.
+
+    Args:
+        alpha (float): Amplitude of perturbation.
+        k (float): Wave number.
+        L (float): Domain length.
+        N (int): Number of particles to sample.
+
+    Returns:
+        np.ndarray: Array of particle positions sampled according to x + (alpha*sin(k*x)/k).
+    """
+    xp = np.zeros(N)
+    u0 = np.random.rand(N)
+    for i in range(N):
+        u = L * u0[i]
+        x = u / (1 + alpha)  # initial guess
+        xp[i], _ = Newton1d(x, alpha, k, u)
+    return xp
+
+
+def findsource():
+    """
+    Placeholder function for a particle source term.
+
+    Returns:
+        None: No source term is implemented.
+    """
+    return None

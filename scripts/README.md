@@ -28,7 +28,7 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--disableTensorboard`: Disable Tensorboard logging
 - `--lossesFile`: File to write loss values
 
-###  `rbc_eval/eval{2d,3d}.py`
+### `rbc_eval/eval{2d,3d}.py`
 Comprehensive evaluation script for trained FNO models with detailed analysis and visualization for Rayleigh Benard Convection
 
 **Features:**
@@ -58,14 +58,38 @@ python eval{2d,3d}.py --checkpoint model.pt --dataFile dataset.h5 --tSteps 10
 - `--subtitle`: Subtitle for contour plots (default: `(256,64)`)
 - `--config`: Configuration file for evaluation parameters
 
-### `eval_template.md`
-Markdown template for evaluation report generation. 
-
-## Dataset Requirements
+**Dataset Requirements**
 
 The scripts work with HDF5 datasets containing:
 - `inputs`: Initial conditions for simulations
 - `outputs`: Target solutions or updates
 - `infos`: Metadata including grid information, timesteps, and dataset parameters
 - `xGrid`, `yGrid`: Spatial grid coordinates (if available)
+
+###  `pic_eval/eval1d.py`
+Comprehensive evaluation script for trained FNO models with visualization for PIC in 1D
+
+**Usage:**
+```bash
+python eval1d.py --checkpoint model.pt 
+``` 
+OR
+ ```bash
+ python eval1d.py --config  config.yaml
+ ```
+
+**Key Parameters:**
+- `--kc`: Wave vector (default: 0.5)  
+- `--NG`: Number of grid points (default: 32)  
+- `--T`: Total simulation time (default: 20)  
+- `--dt`: Time step size (default: 0.05)  
+- `--Vt`: Thermal velocity (default: 1)  
+- `--nParticle`: Number of simulation particles (default: 50)  
+- `--Qm`: Charge per mass (default: -1)  
+- `--checkpoint`: Model checkpoint file (default: None)  
+- `--runId`: Run index for output files (default: 1)  
+- `--imgExt`: Image file extension (default: `png`)  
+- `--evalDir`: Directory to store evaluation results (default: `eval`)  
+- `--config`: Configuration file for evaluation parameters (default: None)  
+
 

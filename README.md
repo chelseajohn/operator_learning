@@ -68,3 +68,4 @@ srun python -u -m torch.distributed.run   \
 ## Problems Solved
 
 - **Rayleigh-Bénard convection** in 2D/3D using FNO, with datasets generated via the pseudo-spectral solver [Dedalus](https://dedalus-project.readthedocs.io/en/latest/) for 2D and [pySDC](https://zenodo.org/records/15196003) for 3D.
+- **Particle-In-Cell** (1D) algorithm using FNO for electric field prediction

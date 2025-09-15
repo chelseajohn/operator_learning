@@ -80,10 +80,16 @@ train:
   disableTensorboard: false
 
 eval:
-  iSimu: 0
   runId: 1
   imgExt: png
   evalDir: eval1D
-  tSteps: 1
+  kc : 0.5
+  NG : 32
+  T: 5
+  dt: 0.05
+  Vt: 1
+  nParticle: 50
+  Qm : -1
+  
 
  
