@@ -61,18 +61,18 @@ class VandermondeTransform:
     def make_2Dmatrix(self):
         """Generates Vandermonde 2D matrices for forward and inverse transforms."""
 
-        V_x = torch.zeros([self.kX, self.nCol], dtype=torch.cfloat)
-        for row in range(self.kX):
-             for col in range(self.nCol):
-                V_x[row, col] = torch.exp(-1j * row * self.xPos[col]) 
-        V_x = V_x / np.sqrt(self.nCol)
- 
-        V_y = torch.zeros([2 * self.kY, self.nRow], dtype=torch.cfloat)
+        V_x = torch.zeros([self.kY, self.nRow], dtype=torch.cfloat)
         for row in range(self.kY):
              for col in range(self.nRow):
-                V_y[row, col] = torch.exp(-1j * row *  self.yPos[col]) 
-                V_y[-(row+1), col] = torch.exp(-1j * (self.nRow - row - 1) * self.yPos[col]) 
-        V_y = V_y / np.sqrt(self.nRow)
+                V_x[row, col] = torch.exp(-1j * row * self.yPos[col]) 
+        V_x = V_x / np.sqrt(self.nRow)
+ 
+        V_y = torch.zeros([2 * self.kX, self.nCol], dtype=torch.cfloat)
+        for row in range(self.kX):
+             for col in range(self.nCol):
+                V_y[row, col] = torch.exp(-1j * row *  self.xPos[col]) 
+                V_y[-(row+1), col] = torch.exp(-1j * (self.nCol - row - 1) * self.xPos[col]) 
+        V_y = V_y / np.sqrt(self.nCol)
 
         return V_x.T, torch.conj(V_x.clone()), V_y.T, torch.conj(V_y.clone())
     
@@ -83,13 +83,11 @@ class VandermondeTransform:
         if self.dim == 1:
            data_fwd = torch.matmul(data, self.Vt.to(data.device))
         else:
-            data_fwd = torch.transpose(
-                torch.matmul(
-                    torch.transpose(
-                        torch.matmul(data, self.Vxt.to(data.device)),
-                    2, 3),
-                self.Vyt.to(data.device)),
-                2, 3)
+            # data: [B, C, Nx, Ny], Vxt: [Ny, Ky], Vyt: [Nx, 2*Kx]
+            x = torch.matmul(data, self.Vxt.to(data.device))  # [B,C,Nx,Ky]
+            x = x.transpose(-2, -1)  # [B,C,Ky,Nx]
+            data_fwd = torch.matmul(x, self.Vyt.to(data.device))  # [B,C,Ky,2*Kx]
+            data_fwd = data_fwd.transpose(-2,-1) # [B,C,2*Kx,Ky]
 
         return data_fwd
     
@@ -98,13 +96,11 @@ class VandermondeTransform:
         if self.dim == 1:
             data_inv = torch.matmul(data, self.Vc.to(data.device))
         else:
-            data_inv = torch.transpose(
-                    torch.matmul(
-                        torch.transpose(
-                            torch.matmul(data, self.Vxc.to(data.device)),
-                        2, 3),
-                    self.Vyc.to(data.device)),
-                    2, 3)
-            
+            # data: [B, C, 2*Kx, Ky], Vxc: [Ky, Ny], Vyc: [2*Kx, Nx]
+            x = torch.matmul(data, self.Vxc.to(data.device)) # [B,C,2*Kx,Ny]
+            x = x.transpose(-2,-1)  # [B,C,Ny,2*Kx]
+            data_inv =  torch.matmul(x,self.Vyc.to(data.device)) # [B,C,Ny, Nx]
+            data_inv = data_inv.transpose(-2,-1) # [B,C,Nx, NY]
+   
         return data_inv
 

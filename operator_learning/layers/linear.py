@@ -31,8 +31,6 @@ class GridLinear(nn.Module):
                 else:
                     self.biases.append(nn.Parameter(torch.empty(layer_sizes[i + 1], 1, 1, 1)))
 
-        
-
         # Initialize parameters (same as in pytorch for nn.Linear)
         for i,weight in enumerate(self.weights):
             nn.init.kaiming_uniform_(weight, a=math.sqrt(5))

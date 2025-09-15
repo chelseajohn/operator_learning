@@ -254,11 +254,11 @@ class FNO(nn.Module):
 if __name__ == "__main__":
     # Quick script testing
     model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True, position=[torch.arange(64)])
-    model2D = FNO(da=4, dv=16, du=4, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=False)
+    model2D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True, position=[torch.arange(64),torch.arange(32)])
     model3D = FNO(da=5, dv=10, du=5, n_layers=4, kX=12, kY=12, kZ=12, n_dims=3)
     uIn_1d = torch.rand(5, 2, 64)
-    uIn_2d = torch.rand(5, 4, 64, 32)
+    uIn_2d = torch.rand(5, 2, 64, 32)
     uIn_3d = torch.rand(5, 5, 64, 64, 32)
-    print_rank0(f"FNO2D Model Output:{model1D(uIn_1d).shape}")
+    print_rank0(f"FNO1D Model Output:{model1D(uIn_1d).shape}")
     print_rank0(f"FNO2D Model Output:{model2D(uIn_2d).shape}")
     print_rank0(f"FNO3D Model Output:{model3D(uIn_3d).shape}")
