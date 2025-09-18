@@ -4,7 +4,7 @@ from typing import List
 # class for 1,2-dimensional Fourier transforms on a nonequispaced lattice of data
 # ref: https://github.com/camlab-ethz/DSE-for-NeuralOperators/blob/main/ShearLayer/fno_dse.py
 class VandermondeTransform:
-    def __init__(self, kX, kY=None, dataset=None, position:List[float]=None, dim=2):
+    def __init__(self, kX, kY=None, dataset=None, position: List[np.ndarray] = None, dim=2):
         self.kX = kX
         self.kY = kY
         assert dim in (1, 2), "dim must be 1 or 2"
@@ -17,11 +17,11 @@ class VandermondeTransform:
                 xPos = torch.tensor(dataset.grid[0])
             except AttributeError:
                 if dim == 1:
-                    xPos = torch.tensor(dataset.inputs[:, 0, :].flatten())
+                    xPos = torch.tensor(dataset.inputs[:, 0, :].flatten(), dtype=torch.float32)
                 else:
-                    xPos = torch.tensor(dataset.inputs[:, 0, :, 0].flatten())
+                    xPos = torch.tensor(dataset.inputs[:, 0, :, 0].flatten(), dtype=torch.float32)
         else:
-            xPos = position[0]
+            xPos = torch.tensor(position[0], dtype=torch.float32)
     
         # scaling btw 0 2*pi
         self.xPos = (xPos - xPos.min()) / (xPos.max() + 1) * 2 * np.pi
@@ -30,11 +30,11 @@ class VandermondeTransform:
         if dim == 2 and kY is not None:
             if dataset is not None:
                 try:
-                    yPos = torch.tensor(dataset.grid[1])
+                    yPos = torch.tensor(dataset.grid[1], dtype=torch.float32)
                 except AttributeError:
-                    yPos = torch.tensor(dataset.inputs[:, 0, 0, :].flatten())
+                    yPos = torch.tensor(dataset.inputs[:, 0, 0, :].flatten(), dtype=torch.float32)
             else:
-                yPos = position[1]
+                yPos = torch.tensor(position[1], dtype=torch.float32)
             
             # scaling btw 0 2*pi
             self.yPos = (yPos - yPos.min()) / (yPos.max() + 1) * 2 * np.pi

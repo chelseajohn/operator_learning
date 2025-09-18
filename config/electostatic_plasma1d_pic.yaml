@@ -46,11 +46,10 @@ model:
   use_skip_connection: false
   skip_type: soft-gating
   use_dse: false
+  position: None                          # numpy file containing position array for DSE
   get_subdomain_output: false             # set to true only for inference
   iXBeg: 0
-  iYBeg: 0
   iXEnd: 0
-  iYEnd: 0
 
 optim:
   name: adam

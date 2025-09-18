@@ -2,6 +2,7 @@ import os
 import time
 from pathlib import Path
 from collections import OrderedDict
+import numpy as np
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -70,6 +71,15 @@ class FourierNeuralOperator:
         self.outType = self.dataset.outType
         self.outScaling = self.dataset.outScaling
 
+        # explicit position for DSE
+        if model['position'] is not None:
+            pos = np.load(model['position'])
+            position = [pos[i] for i in range(len(pos.shape))]
+            self.position = position
+        else:
+            self.position = None
+        model.pop('position')
+
         # Loss
         if loss is None:    # Use default settings
             loss = {
@@ -115,7 +125,9 @@ class FourierNeuralOperator:
     # Setup and utility methods
     # -------------------------------------------------------------------------
     def setupModel(self, model_config):
-        self.model = FNO(**model_config, dataset=self.dataset).to(self.device)
+        dataset = None if self.position is not None else self.dataset
+        position = self.position if self.position is not None else None
+        self.model = FNO(**model_config, dataset=dataset, position=position).to(self.device)
         self.modelConfig = model_config.copy()
         print_rank0(self.modelConfig)
         model_df = self.model.print_size()

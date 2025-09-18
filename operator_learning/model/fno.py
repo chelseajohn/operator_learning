@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import pandas as pd
 import torch.nn.functional as F
-
+import numpy as np
 from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer
@@ -114,7 +114,7 @@ class FNO(nn.Module):
            if dataset is not None:
                 transformer = VandermondeTransform(kX=kX, kY=kY, dataset=dataset, dim=n_dims)
            else:
-                position = kwargs.get('position', [torch.arange(kX)])
+                position = kwargs.get('position')
                 transformer = VandermondeTransform(kX=kX, kY=kY, position=position, dim=n_dims)
         else:
            transformer = None
@@ -253,8 +253,8 @@ class FNO(nn.Module):
 
 if __name__ == "__main__":
     # Quick script testing
-    model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True, position=[torch.arange(64)])
-    model2D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True, position=[torch.arange(64),torch.arange(32)])
+    model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True, position=[np.arange(64)])
+    model2D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True, position=[np.arange(64),np.arange(32)])
     model3D = FNO(da=5, dv=10, du=5, n_layers=4, kX=12, kY=12, kZ=12, n_dims=3)
     uIn_1d = torch.rand(5, 2, 64)
     uIn_2d = torch.rand(5, 2, 64, 32)

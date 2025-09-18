@@ -14,7 +14,7 @@ from operator_learning.utils.misc import readConfig
 # Script parameters
 # -----------------------------------------------------------------------------
 parser = argparse.ArgumentParser(
-    description='Train a 2D/3D FNO model on a given dataset',
+    description='Train a 1D/2D/3D FNO model on a given dataset',
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument(
     "--trainDir", default="trainDir", help="directory to store training results")
