@@ -2,7 +2,7 @@ simu:
   dataDir: pysdc_fno/rbc3d_1e-5_pysdc
   Rayleigh: 1e5
   Pr: 0.7
-  resFactor: 32
+  resFactor: 32   # z-axis
   nDim: 3
   dtSimu: [6e-2, 4e-2, 2e-2, 1e-2, 5e-3, 2e-3]
   iBeg: 100
@@ -23,7 +23,7 @@ data:
   xStep: 1
   yStep: 1
   zStep: 1
-  dataFile: rbc3d_1e-5_pysdc/RBC3DG4Ra1e5-res32_solution.h5
+  dataFile: rbc3d_1e5_pysdc/RBC3DG4Ra1e5-res32_solution.h5
   trainRatio: 0.8
   batchSize: 20
   sampling_mode: None  # Domain Sampling: [fixed, ordered, random]
