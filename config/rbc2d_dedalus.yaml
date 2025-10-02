@@ -49,7 +49,6 @@ model:
   bias: false
   non_linearity: gelu
   scaling_layers: 4
-  use_prechannel_mlp: true
   use_postfnochannel_mlp: false
   channel_mlp_expansion: 4
   use_skip_connection: false
