@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import pandas as pd
 import torch.nn.functional as F
-import numpy as np
 from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer
@@ -63,8 +62,6 @@ class FNOLayer(nn.Module):
             v1 = self.channel_mlp(v)
             v = v + v1
         
-        #SM: I am  a bit confused by this. I thought the skip connection
-        #network is the W. Why there are two things?
         w = self.W(x)                   # Linear operator
 
         v = v + w
@@ -86,7 +83,6 @@ class FNO(nn.Module):
                  non_linearity='gelu',
                  bias=True, 
                  scaling_layers=4,
-                 use_prechannel_mlp=False,
                  use_postfnochannel_mlp=False,
                  channel_mlp_expansion=4,
                  use_skip_connection=False, 
@@ -112,48 +108,26 @@ class FNO(nn.Module):
         self.use_dse = use_dse
         self.dataset = dataset
 
-        if use_dse:
-           if dataset is not None:
-                transformer = VandermondeTransform(kX=kX, kY=kY, dataset=dataset, dim=n_dims)
-           else:
-                position = kwargs.get('position')
-                transformer = VandermondeTransform(kX=kX, kY=kY, position=position, dim=n_dims)
+        if use_dse and dataset is not None:
+            transformer = VandermondeTransform(kX=kX, kY=kY, dataset=dataset, dim=n_dims)
         else:
            transformer = None
    
-        # Use conv1d
-        # SM: Why this is called prechannel mlp?
-        if use_prechannel_mlp:
-            self.P = MLP( mode='channel',
-                          n_dims=n_dims,
-                          n_layers=scaling_layers,
-                          in_channels=da,
-                          out_channels=dv,
-                          hidden_channels=round(dv*channel_mlp_expansion),
-                        )
-            self.Q = MLP( mode='channel',
-                          n_dims=n_dims,
-                          n_layers=scaling_layers,
-                          in_channels=dv,
-                          out_channels=du,
-                          hidden_channels=round(dv*channel_mlp_expansion),
-                        )
-        else:
-            self.P = GridLinear(inSize=da,
-                                outSize=dv,
-                                hiddenSize=dv*channel_mlp_expansion,
-                                bias=bias,
-                                n_dims=n_dims,
-                                n_layers=scaling_layers
-                                )
-            self.Q = GridLinear(inSize=dv,
-                                outSize=du,
-                                hiddenSize=dv*channel_mlp_expansion,
-                                bias=bias,
-                                n_dims=n_dims,
-                                n_layers=scaling_layers
-                                )
-           
+        self.P = MLP( mode='channel',
+                        n_dims=n_dims,
+                        n_layers=scaling_layers,
+                        in_channels=da,
+                        out_channels=dv,
+                        hidden_channels=round(dv*channel_mlp_expansion),
+                    )
+        self.Q = MLP( mode='channel',
+                        n_dims=n_dims,
+                        n_layers=scaling_layers,
+                        in_channels=dv,
+                        out_channels=du,
+                        hidden_channels=round(dv*channel_mlp_expansion),
+                    )
+       
         if transformer is not None:
             self.layers = nn.ModuleList(
                 [DSELayer(dv, transformer,
@@ -173,25 +147,6 @@ class FNO(nn.Module):
                           skip_type=skip_type)
                  for _ in range(n_layers)])
 
-
-        # if self.use_postfnochannel_mlp:
-        #     self.channel_mlp = nn.ModuleList(
-        #                         [MLP(mode='channel',
-        #                             n_dims=n_dims,
-        #                             n_layers=scaling_layers,
-        #                             in_channels=dv,
-        #                             out_channels=dv,
-        #                             hidden_channels=round(dv/channel_mlp_expansion)
-        #                             ) 
-        #                         for _ in range(n_layers)])
-            
-        #     self.channel_mlp_skips = nn.ModuleList(
-        #                                 [SkipConnection(in_channel=dv,
-        #                                                 out_channel=dv,
-        #                                                 n_dims=n_dims,
-        #                                                 skip_type=skip_type,
-        #                                                 bias=bias)
-        #                                 for _ in range(n_layers)])
 
         self.memory = CudaMemoryDebugger(print_mem=True)
         self.get_subdomain_output = get_subdomain_output
@@ -215,17 +170,8 @@ class FNO(nn.Module):
         # print_rank0(f'Shape of Px: {x.shape}')
 
         for index,layer in enumerate(self.layers):
-            # if self.use_postfnochannel_mlp:
-            #     x_skip_channel_mlp = self.channel_mlp_skips[index](x)
-
             x = layer(x)
-            # print_rank0(f'Shape of {index}x: {x.shape}')
-
-            # if self.use_postfnochannel_mlp:
-            #      x = self.channel_mlp[index](x) + x_skip_channel_mlp
-            #      if index < len(self.layers) - 1:
-            #         x = nn.functional.gelu(x)
-
+          
         # to get only a subdomain output inference
         if self.get_subdomain_output:
             print_rank0(f'Filtering to x-subdomain {self.iXBeg,self.iXEnd} & y-subdomain {self.iYBeg,self.iYEnd}')
@@ -256,10 +202,10 @@ class FNO(nn.Module):
 
 if __name__ == "__main__":
     # Quick script testing
-    model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True, position=[np.arange(64)])
-    model2D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True, position=[np.arange(64),np.arange(32)])
+    model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1)
+    model2D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, kY=12, n_dims=2)
     model3D = FNO(da=5, dv=10, du=5, n_layers=4, kX=12, kY=12, kZ=12, n_dims=3)
-    uIn_1d = torch.rand(5, 2, 64)
+    uIn_1d = torch.rand(2, 2, 100000)
     uIn_2d = torch.rand(5, 2, 64, 32)
     uIn_3d = torch.rand(5, 5, 64, 64, 32)
     print_rank0(f"FNO1D Model Output:{model1D(uIn_1d).shape}")
