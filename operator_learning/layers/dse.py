@@ -19,16 +19,16 @@ class SpectralConv_dse(nn.Module):
         self.scale = 1 / (dv * dv)
         if dim ==1:
             self.kX_sym = int(kX/2) + 1
-            wr = self.scale * torch.rand(dv, dv, self.kX_sym, dtype=torch.cfloat)
-            wi = self.scale * torch.rand(dv, dv, self.kX_sym, dtype=torch.cfloat)
-            self.weightsReal = nn.Parameter(format_complexTensor(wr))
-            self.weightsImag = nn.Parameter(format_complexTensor(wi))
+            weights1 = self.scale * torch.rand(dv, dv, self.kX_sym, dtype=torch.cfloat)
+            weights2 = self.scale * torch.rand(dv, dv, self.kX_sym, dtype=torch.cfloat)
+            self.R1 = nn.Parameter(format_complexTensor(weights1))
+            self.R2 = nn.Parameter(format_complexTensor(weights2))
         else:
             assert kY is not None, "kY must be specified for 2D simulations"
-            wr = self.scale * torch.rand(dv, dv, kX , kY, dtype=torch.cfloat)
-            wi = self.scale * torch.rand(dv, dv, kX , kY, dtype=torch.cfloat)
-            self.weightsReal = nn.Parameter(format_complexTensor(wr))
-            self.weightsImag = nn.Parameter(format_complexTensor(wi))
+            weights1 = self.scale * torch.rand(dv, dv, kX , kY, dtype=torch.cfloat)
+            weights2 = self.scale * torch.rand(dv, dv, kX , kY, dtype=torch.cfloat)
+            self.R1 = nn.Parameter(format_complexTensor(weights1))
+            self.R2 = nn.Parameter(format_complexTensor(weights2))
 
         if bias:
             init_std = (2/ (dv * dim))**0.5
@@ -58,17 +58,17 @@ class SpectralConv_dse(nn.Module):
         b = x.shape[0]
 
         # Transform to fourier space
-        x_ft = self.transformer.forward(x)  # Fourier coeffs (complex)
+        x_ft = self.transformer.forward(x.cfloat())  # Fourier coeffs (complex)
 
         if self.dim == 1:
             out_ft = torch.zeros(b, self.channel, self.kX, dtype=torch.cfloat, device=x.device)
-            out_ft[:, :, :self.kX_sym] = self.compl_mul(x_ft[:, :, :self.kX_sym], self.weightsReal)
-            out_ft[:, :, -self.kX_sym:] = self.compl_mul(x_ft[:, :, -self.kX_sym:], self.weightsImag)
+            out_ft[:, :, :self.kX_sym] = self.compl_mul(x_ft[:, :, :self.kX_sym], self.R1)
+            out_ft[:, :, -self.kX_sym:] = self.compl_mul(x_ft[:, :, -self.kX_sym:], self.R2)
 
         else:
             out_ft = torch.zeros(b, self.channel, 2*self.kX, self.kY, dtype=torch.cfloat, device=x.device)
-            out_ft[:, :, :self.kX, :self.kY] = self.compl_mul(x_ft[:, :, :self.kX, :self.kY], self.weightsReal)
-            out_ft[:, :, -self.kX:, :self.kY] = self.compl_mul(x_ft[:, :, -self.kX:, :self.kY], self.weightsImag)
+            out_ft[:, :, :self.kX, :self.kY] = self.compl_mul(x_ft[:, :, :self.kX, :self.kY], self.R1)
+            out_ft[:, :, -self.kX:, :self.kY] = self.compl_mul(x_ft[:, :, -self.kX:, :self.kY], self.R2)
 
         # Return to physical space
         x = self.transformer.inverse(out_ft)
@@ -76,7 +76,7 @@ class SpectralConv_dse(nn.Module):
         if self.bias is not None:
             x = x + self.bias
 
-        return x
+        return x.real
 
 
 class DSELayer(nn.Module):
@@ -85,7 +85,7 @@ class DSELayer(nn.Module):
                  kX, kY=None, 
                  non_linearity='gelu',
                  bias=False,
-                 dim=2
+                 dim=1
                  ):
         super().__init__()
 
@@ -97,24 +97,20 @@ class DSELayer(nn.Module):
 
        
         self.conv = SpectralConv_dse(dv, transformer, kX, kY, bias, dim)
-        self.Wr = GridLinear(
+        self.W = GridLinear(
                     inSize=dv, outSize=dv, hiddenSize=None,
                     bias=bias, n_layers=1, non_linearity=self.sigma,
                     n_dims=dim,
                     )
-        self.Wi = GridLinear(inSize=dv, outSize=dv, hiddenSize=None,
-                    bias=bias, n_layers=1, non_linearity=self.sigma,
-                    n_dims=dim,
-                    )           
+        
 
     def forward(self, x):
-        """ x[nBatch, dv, nY, nX] -> [nBatch, dv, nY, nX] """
-        x = x.to(torch.cfloat)
+        """ x[nBatch, dv, nX, nY] -> [nBatch, dv, nX, nY] """
         v = self.conv(x)
-        w = self.Wr(x.real) + 1j * self.Wi(x.imag)
+        w = self.W(x)
         v += w
-        o = self.sigma(v.real) + 1j * self.sigma(v.imag)
+        o = self.sigma(v)
 
-        return o.real
+        return o
 
 

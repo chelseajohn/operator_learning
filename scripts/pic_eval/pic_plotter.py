@@ -104,12 +104,6 @@ class PICVisualizer:
             # Enforce periodic boundary conditions
             xp = toPeriodic(xt, self.L)
 
-            # Interpolation: particle -> grid
-            M = interpMatrix(XP=xp, wp=1, DX=self.dx, N=self.N, NG=self.NG, p=p)
-            rho = interpolate(M=M, DX=self.dx, NG=self.NG, Q=self.Q, rho_back=self.rho_back)
-
-            # Compute fields
-            phi, Eg = field(rho=rho, L=self.L)
 
             # Store particle positions
             pos[it, :] = xp.astype(np.float32)
@@ -125,6 +119,13 @@ class PICVisualizer:
                 times_acc.append(time.time() - t0)
             else:
                 t0 = time.time()
+                # Interpolation: particle -> grid
+                M = interpMatrix(XP=xp, wp=1, DX=self.dx, N=self.N, NG=self.NG, p=p)
+                rho = interpolate(M=M, DX=self.dx, NG=self.NG, Q=self.Q, rho_back=self.rho_back)
+
+                # Compute fields
+                phi, Eg = field(rho=rho, L=self.L)
+                
                 a, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it)
                 times_acc.append(time.time() - t0)
 
@@ -134,12 +135,13 @@ class PICVisualizer:
             # Update positions and weights
             xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.L, it=it)
 
-            # Compute potential energy
-            Epotential = potential(rho=rho, phi=phi, dx=self.dx)
-
             # Electric field energy
             Egp = np.sum(Eout[it, :] ** 2) * self.L / self.N
 
+            # Compute potential energy
+            #Epotential = potential(rho=rho, phi=phi, dx=self.dx)
+            Epotential = 0.5 * Egp
+            
             # Append energies and momentum
             Ek.append(kinetic)
             Ep.append(Epotential)
