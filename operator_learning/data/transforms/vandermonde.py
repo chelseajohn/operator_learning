@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from typing import List
+
 # class for 1,2-dimensional Fourier transforms on a nonequispaced lattice of data
 # ref: https://github.com/camlab-ethz/DSE-for-NeuralOperators/blob/main/ShearLayer/fno_dse.py
 class VandermondeTransform:

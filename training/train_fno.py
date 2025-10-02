@@ -7,7 +7,8 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
-
+import torch.profiler as tprof
+import torch.cuda.nvtx as nvtx
 from operator_learning.data import getDataLoaders
 from operator_learning.model import FNO
 from operator_learning.loss import LOSSES_CLASSES
@@ -23,7 +24,8 @@ class FourierNeuralOperator:
 
     def __init__(self, data:dict=None, model:dict=None, optim:dict=None, 
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
-                loss:dict=None, checkpoint=None, eval_only=False, debug=False, device=None):
+                loss:dict=None, profile:dict=None, checkpoint=None,
+                eval_only=False, debug=False, device=None):
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -32,6 +34,31 @@ class FourierNeuralOperator:
         self.rank = int(os.getenv('RANK', '0'))
         self.world_size = int(os.getenv('WORLD_SIZE', '1'))
         self.debug = debug
+        
+        if profile is not None:
+            self.enable_profile = profile['enableProfiler']
+            self.profiler_type = profile['profiler']
+            self.profiler_dir = profile['profileDir']
+            if self.profiler_type == "torch":
+                activities = [tprof.ProfilerActivity.CPU]
+                if torch.cuda.is_available():
+                    activities.append(tprof.ProfilerActivity.CUDA)
+                self.profiler = tprof.profile(
+                    activities=activities,
+                    schedule=tprof.schedule(skip_first=0, wait=1, warmup=1, active=3, repeat=1),
+                    on_trace_ready=tprof.tensorboard_trace_handler(self.profiler_dir),
+                    record_shapes=True,
+                    profile_memory=True,
+                    with_stack=True,
+                    with_flops=True,
+                    with_modules=True
+                )
+                print_rank0(f"[Profiler] Torch profiler enabled, results will be written to {self.profiler_dir}")
+        else:
+            self.enable_profile = False
+            self.profiler_type = None
+            self.profiler = None
+
 
         if parallel_strategy is not None:
             gpus_per_node = parallel_strategy.pop("gpus_per_node", 4)
@@ -72,13 +99,14 @@ class FourierNeuralOperator:
         self.outScaling = self.dataset.outScaling
 
         # explicit position for DSE
-        if model['position'] is not None:
+        if 'position' in model.keys():
             pos = np.load(model['position'])
             position = [pos[i] for i in range(len(pos.shape))]
             self.position = position
+            model.pop('position')
         else:
             self.position = None
-        model.pop('position')
+        
 
         # Loss
         if loss is None:    # Use default settings
@@ -199,6 +227,12 @@ class FourierNeuralOperator:
         optimizer = self.optimizer
         scheduler = self.lr_scheduler
 
+        # Epoch
+        if self.enable_profile:
+            if self.profiler_type == "torch":
+                self.profiler.start()
+            nvtx.range_push(f"TrainEpoch_{self.epochs}")
+
         # nSamples = len(self.trainLoader.dataset)
         nBatches = len(self.trainLoader)
         # batchSize = self.trainLoader.batch_size
@@ -217,6 +251,10 @@ class FourierNeuralOperator:
             # batchSize = len(inp_list[0])
 
         for iBatch in range(nBatches):
+            # Batch
+            if self.enable_profile:
+                nvtx.range_push(f"TrainBatch_{iBatch}")
+                
             if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
                 data = (inp_list[iBatch], out_list[iBatch])
             else:
@@ -224,14 +262,29 @@ class FourierNeuralOperator:
             inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
             ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
 
+            # Forward pass
+            if self.enable_profile:
+                nvtx.range_push("forward")
             pred = model(inp)
-            loss = self.lossFunction(pred, ref)
+            if self.enable_profile:
+                nvtx.range_pop()   # end forward
 
+            if self.enable_profile:
+                nvtx.range_push("loss")
+            loss = self.lossFunction(pred, ref)
+            if self.enable_profile:
+                nvtx.range_pop() # end loss
+            
             optimizer.zero_grad()
             if self.debug:
                 print_rank0(f"[DEBUG] batch loss: {loss.item():.6e}, pred min/max: {pred.min().item():.6e}/{pred.max().item():.6e}, ref min/max: {ref.min().item():.6e}/{ref.max().item():.6e}")
             
+            # Backward 
+            if self.enable_profile:
+                nvtx.range_push("backward")
             loss.backward()
+            if self.enable_profile:
+                nvtx.range_pop()  # end backward
             
             if self.debug:
                 any_grad_nonzero = False
@@ -249,7 +302,17 @@ class FourierNeuralOperator:
                 real_model = self.model.module if self.DDP_enabled else self.model
                 param_before = real_model.P.layers[0].weight.clone()
 
+            # Optimizer
+            if self.enable_profile:
+                nvtx.range_push("optimizer_step")
             optimizer.step()
+            if self.enable_profile:
+                nvtx.range_pop() # end optimizer
+
+            if self.enable_profile:
+                if self.profiler_type == "torch":
+                    self.profiler.step()
+                nvtx.range_pop() # end batch
 
             if self.debug:
                 param_after = real_model.P.layers[0].weight
@@ -286,10 +349,14 @@ class FourierNeuralOperator:
         avg_loss = total_loss / nBatches
 
         if self.DDP_enabled:
+            if self.enable_profile:
+                nvtx.range_push(f"TrainEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
             ddp_loss = torch.Tensor([avg_loss]).to(self.device).clone()
             self.communicator.allreduce(ddp_loss,op=dist.ReduceOp.AVG)
             train_loss = ddp_loss.item()
+            if self.enable_profile:
+                nvtx.range_pop()  # end ddploss
         else:
             train_loss = avg_loss
 
@@ -297,12 +364,19 @@ class FourierNeuralOperator:
         self.gradientNormEpoch = gradsEpoch / nBatches
         print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.6f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
 
+        if self.enable_profile:
+            if self.profiler_type == "torch":
+                self.profiler.stop()
+            nvtx.range_pop() # end epoch
+          
+
     def valid(self):
         model = self.model.eval()
         nBatches = len(self.valLoader)
         # batchSize = self.valLoader.batch_size
         total_loss = 0.0
         data_iter = iter(self.valLoader)
+
         if self.dataClass == 'rbc':
            idLoss = self.losses['id']['valid']
         else:
@@ -316,22 +390,41 @@ class FourierNeuralOperator:
 
         with torch.no_grad():
             for iBatch in range(nBatches):
+                if self.enable_profile:
+                    nvtx.range_push(f"ValEpoch_{self.epochs}_Batch_{iBatch}")
+                
                 if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
+
                 inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                 ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
+
+                if self.enable_profile:
+                    nvtx.range_push("forward")
                 pred = model(inp)
+                if self.enable_profile:
+                    nvtx.range_pop() # end forward
+                
+                if self.enable_profile:
+                    nvtx.range_push("valLoss")
                 loss = self.lossFunction(pred,ref)
                 total_loss += loss.item()
+                if self.enable_profile:
+                    nvtx.range_pop() # end loss
+                    nvtx.range_pop() # end batch
 
         avg_loss = total_loss / nBatches
         if self.DDP_enabled:
+            if self.enable_profile:
+                nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
             ddp_loss = torch.Tensor([avg_loss]).to(self.device).clone()
             self.communicator.allreduce(ddp_loss,op=dist.ReduceOp.AVG)
             val_loss = ddp_loss.item()
+            if self.enable_profile:
+                nvtx.range_pop() # end ddploss
         else:
             val_loss = avg_loss
 
@@ -344,6 +437,9 @@ class FourierNeuralOperator:
         end_epoch = start_epoch + nEpoch
         for i in range(start_epoch, end_epoch):
             print_rank0(f"\nEpoch {i}")
+            # start profiling only from 3 iteration
+            if i == 3 and self.enable_profile and self.profiler_type == "nsys":
+                torch.cuda.cudart().cudaProfilerStart()
             t0_comp = time.perf_counter()
             self.train()
             self.valid()
@@ -355,14 +451,20 @@ class FourierNeuralOperator:
             t_monit = time.perf_counter()- t0_monit
 
             if i % save_interval == 0 or i == end_epoch-1 :
+                if self.enable_profile:
+                    nvtx.range_push("checkpointing")
                 t0_save = time.perf_counter()
                 self.save(f'model_epoch{i}.pt')
                 t_save = time.perf_counter() - t0_save
+                if self.enable_profile:
+                    nvtx.range_pop()  # end checkpoint
                 print_rank0(f" --- End of epoch {self.epochs} (tComp: {t_comp:1.2e}s, tMonit: {t_monit:1.2e}s tSave: {t_save:1.2e}s) ---")
 
             self.epochs += 1
         
         print_rank0("Done Training!")
+        if self.enable_profile and self.profiler_type == "nsys":
+            torch.cuda.cudart().cudaProfilerStop()
 
     def monitor(self):
         if self.USE_TENSORBOARD and self.rank == 0:

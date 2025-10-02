@@ -1,3 +1,4 @@
+from operator_learning.utils import flop_wrappers
 import torch 
 import torch.nn as nn
 import pandas as pd
@@ -6,7 +7,7 @@ import numpy as np
 from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer
-from operator_learning.data import VandermondeTransform
+from operator_learning.data.transforms.vandermonde import VandermondeTransform
 
 class FNOLayer(nn.Module):
 

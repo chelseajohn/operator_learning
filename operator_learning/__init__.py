@@ -2,5 +2,5 @@ from .data import runSimu, OutputFiles, RBCDataset, getDataLoaders, PICDataset, 
 from .layers import SpectralConv, SkipConnection, GridLinear, MLP
 from .loss import VectorNormLoss
 from .model import FNO
-from .utils import communication, memory_utils, misc
+from .utils import communication, memory_utils, misc, flop_wrappers
 
