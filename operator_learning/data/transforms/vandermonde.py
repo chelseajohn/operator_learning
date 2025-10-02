@@ -19,11 +19,13 @@ class VandermondeTransform:
                 if dim == 1:
                     xPos = torch.tensor(dataset.inputs[:, 0, :].flatten(), dtype=torch.float32)
                 else:
+                    # SM: I don't understand this. Is this for the other datasets?
                     xPos = torch.tensor(dataset.inputs[:, 0, :, 0].flatten(), dtype=torch.float32)
         else:
             xPos = torch.tensor(position[0], dtype=torch.float32)
     
         # scaling btw 0 2*pi
+        # SM: Why +1 in denom?
         self.xPos = (xPos - xPos.min()) / (xPos.max() + 1) * 2 * np.pi
         self.nCol = self.xPos.shape[0]
 
@@ -32,6 +34,7 @@ class VandermondeTransform:
                 try:
                     yPos = torch.tensor(dataset.grid[1], dtype=torch.float32)
                 except AttributeError:
+                    # SM: Same don't understand this slicing. Is this for the other datasets?
                     yPos = torch.tensor(dataset.inputs[:, 0, 0, :].flatten(), dtype=torch.float32)
             else:
                 yPos = torch.tensor(position[1], dtype=torch.float32)
@@ -83,6 +86,7 @@ class VandermondeTransform:
         if self.dim == 1:
            data_fwd = torch.matmul(data, self.Vt.to(data.device))
         else:
+            # SM: So in PIC Nx and Ny corresponds to x and y positions of particles right?
             # data: [B, C, Nx, Ny], Vxt: [Ny, Ky], Vyt: [Nx, 2*Kx]
             x = torch.matmul(data, self.Vxt.to(data.device))  # [B,C,Nx,Ky]
             x = x.transpose(-2, -1)  # [B,C,Ky,Nx]

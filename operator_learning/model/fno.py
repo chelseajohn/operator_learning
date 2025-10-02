@@ -62,7 +62,9 @@ class FNOLayer(nn.Module):
         if self.use_postfnochannel_mlp: # MLP
             v1 = self.channel_mlp(v)
             v = v + v1
-            
+        
+        #SM: I am  a bit confused by this. I thought the skip connection
+        #network is the W. Why there are two things?
         w = self.W(x)                   # Linear operator
 
         v = v + w
@@ -120,6 +122,7 @@ class FNO(nn.Module):
            transformer = None
    
         # Use conv1d
+        # SM: Why this is called prechannel mlp?
         if use_prechannel_mlp:
             self.P = MLP( mode='channel',
                           n_dims=n_dims,

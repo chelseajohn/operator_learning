@@ -108,6 +108,8 @@ class DSELayer(nn.Module):
         """ x[nBatch, dv, nY, nX] -> [nBatch, dv, nY, nX] """
         x = x.to(torch.cfloat)
         v = self.conv(x)
+        # Once we take the inverse transform and return to physical space we can directly take real values there right?
+        # Why is there a imaginary part in W too and finally only we are taking o.real?
         w = self.Wr(x.real) + 1j * self.Wi(x.imag)
         v += w
         o = self.sigma(v.real) + 1j * self.sigma(v.imag)

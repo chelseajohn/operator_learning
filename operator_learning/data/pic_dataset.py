@@ -173,7 +173,7 @@ def createDatasetFromPIC(picFile: str,
     outputs = outputs[perm]    # shape: (samples, 1, field)
 
     # Normalize
-    inputs[:, :, 0] = normalize_per_sample(inputs[:, :, 0])
+    inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
     outputs, mean, std = normalize_global_zscore(outputs)
 
 
