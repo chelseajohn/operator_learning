@@ -97,6 +97,7 @@ class FNO(nn.Module):
                  iYEnd=None,
                  iZEnd=None,
                  dataset=None,
+                 dataClass='pic',
                  **kwargs
                  ):
         
@@ -108,9 +109,10 @@ class FNO(nn.Module):
         # DSE not implemented for 3D
         self.use_dse = use_dse
         self.dataset = dataset
+        self.dataClass = dataClass
 
-        if use_dse and dataset is not None:
-            transformer = VandermondeTransform(kX=kX, kY=kY, dataset=dataset, dim=n_dims)
+        if use_dse:
+            transformer = VandermondeTransform(kX=kX, kY=kY, dataset=dataset, dataClass=dataClass, dim=n_dims)
         else:
            transformer = None
    
@@ -131,11 +133,11 @@ class FNO(nn.Module):
        
         if transformer is not None:
             self.layers = nn.ModuleList(
-                [DSELayer(dv, transformer,
-                          kX, kY, 
-                          non_linearity,
-                          bias,
-                          n_dims)
+                [DSELayer(dv=dv, transformer=transformer,
+                          kX=kX, kY=kY, dataClass=dataClass,
+                          non_linearity=non_linearity,
+                          bias=bias,
+                          dim=n_dims)
                  for _ in range(n_layers)])
         else:
             self.layers = nn.ModuleList(
@@ -203,11 +205,11 @@ class FNO(nn.Module):
 
 if __name__ == "__main__":
     # Quick script testing
-    model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1)
-    model2D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, kY=12, n_dims=2)
+    model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True)
+    model2D = FNO(da=3, dv=6, du=2, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True)
     model3D = FNO(da=5, dv=10, du=5, n_layers=4, kX=12, kY=12, kZ=12, n_dims=3)
-    uIn_1d = torch.rand(2, 2, 100000)
-    uIn_2d = torch.rand(5, 2, 64, 32)
+    uIn_1d = torch.rand(5, 2, 100000)
+    uIn_2d = torch.rand(5, 3, 100000)
     uIn_3d = torch.rand(5, 5, 64, 64, 32)
     print_rank0(f"FNO1D Model Output:{model1D(uIn_1d).shape}")
     print_rank0(f"FNO2D Model Output:{model2D(uIn_2d).shape}")

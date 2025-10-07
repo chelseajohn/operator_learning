@@ -7,7 +7,7 @@ from operator_learning.utils.misc import format_complexTensor, deformat_complexT
 from .linear import GridLinear
 
 class SpectralConv_dse(nn.Module):
-    def __init__(self, dv, transformer, kX, kY=None, bias=False, dim=2):
+    def __init__(self, dv, transformer, kX, kY=None, dataClass='pic', bias=False, dim=2):
         super().__init__()
         assert dim in (1, 2), "dim must be 1 or 2"
         self.dim = dim
@@ -32,6 +32,8 @@ class SpectralConv_dse(nn.Module):
 
         if bias:
             init_std = (2/ (dv * dim))**0.5
+            if dataClass == 'pic':
+                dim = 1
             self.bias = nn.Parameter(
                 init_std * torch.randn(*(tuple([dv]) + (1,) * dim))
             )
@@ -66,9 +68,17 @@ class SpectralConv_dse(nn.Module):
             out_ft[:, :, -self.kX_sym:] = self.compl_mul(x_ft[:, :, -self.kX_sym:], self.R2)
 
         else:
-            out_ft = torch.zeros(b, self.channel, 2*self.kX, self.kY, dtype=torch.cfloat, device=x.device)
+            # ToDO: fix for RBC
+            # Reshape into (kx, ky) frequency grid
+            x_ft = x_ft.view(b, self.channel, 2 * self.kX, 2 * self.kY - 1)
+            out_ft = x_ft.new_empty((b, self.channel, 2 * self.kX, self.kY))
             out_ft[:, :, :self.kX, :self.kY] = self.compl_mul(x_ft[:, :, :self.kX, :self.kY], self.R1)
             out_ft[:, :, -self.kX:, :self.kY] = self.compl_mul(x_ft[:, :, -self.kX:, :self.kY], self.R2)
+            out_ft = out_ft.flatten(2)  # [b, c, 2*kX*kY]
+            # Take advantage of real input data and the FFT has complex conjugate symmetry and hence the flip and conj
+            out_ft = torch.cat(
+                [out_ft, out_ft[:, :, 2 * self.kX:].conj().flip(-1)], dim=-1
+            )
 
         # Return to physical space
         x = self.transformer.inverse(out_ft)
@@ -83,6 +93,7 @@ class DSELayer(nn.Module):
     def __init__(self,dv, 
                  transformer, 
                  kX, kY=None, 
+                 dataClass='pic',
                  non_linearity='gelu',
                  bias=False,
                  dim=1
@@ -95,13 +106,14 @@ class DSELayer(nn.Module):
         else:
             self.sigma = nn.ReLU(inplace=True)
 
-       
-        self.conv = SpectralConv_dse(dv, transformer, kX, kY, bias, dim)
+        self.conv = SpectralConv_dse(dv, transformer, kX, kY, dataClass, bias, dim)
+        if dataClass == 'pic':
+            dim = 1 # same execution as 1D since y-cord is a channel
         self.W = GridLinear(
-                    inSize=dv, outSize=dv, hiddenSize=None,
-                    bias=bias, n_layers=1, non_linearity=self.sigma,
-                    n_dims=dim,
-                    )
+                        inSize=dv, outSize=dv, hiddenSize=None,
+                        bias=bias, n_layers=1, non_linearity=self.sigma,
+                        n_dims=dim, 
+                        )
         
 
     def forward(self, x):

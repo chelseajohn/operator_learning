@@ -142,7 +142,8 @@ def createDatasetFromPIC(picFile: str,
                          nDim: int = 1,
                          outType: str = 'solution',
                          outScaling: float = 1.0):
-    
+    # tested for 1D and 2D
+    assert nDim in (1,2), 'tested only for 1D and 2D'
     input_keys = ["pos_weakLandau", "pos_strongLandau", "pos_tsi", "pos_bti"]
     output_keys = ["Eout_weakLandau", "Eout_strongLandau", "Eout_tsi", "Eout_bti"]
 
@@ -151,37 +152,44 @@ def createDatasetFromPIC(picFile: str,
     outputs_list = load_h5Dataset(picFile, output_keys, iEnd, step)
 
 
-    inputs = np.concatenate(inputs_list, axis=0) # (samples, positions)
-    outp = np.concatenate(outputs_list, axis=0)  # (samples, electricField)
-    outputs = outp[:, np.newaxis, :]  # (samples, channel=1, electricField)
+    inp = np.concatenate(inputs_list, axis=0) # 1D: (timestep, position), 2D: (timestep, position, dim) 
+    outp = np.concatenate(outputs_list, axis=0)  # 1D: (timstep, electricField), 2D: (timestep, electricField, dim)
+    if nDim == 1:
+        outputs = outp[:, np.newaxis, :]  # timestep, channel=1, electricField)
+    else:
+        inp = inp.swapaxes(-1,-2)  # (timstep, channel=dim, position)
+        outputs = outp.swapaxes(-1,-2)   # (timstep, channel=dim, electricField)
 
 
     # Build Q array
     q1_xsize = sum(t.shape[0] for t in inputs_list[:3])
     q1_ysize = inputs_list[0].shape[1]
     q1 = np.full((q1_xsize, q1_ysize), -4 * np.pi, dtype=np.float32)
-
     q2 = np.full((inputs_list[-1].shape[0], inputs_list[-1].shape[1]), -2 * np.pi / 0.21, dtype=np.float32)
-    Q = np.concatenate((q1, q2), axis=0)
-
+    Q = np.concatenate((q1, q2), axis=0)  # (timestep, position)
     # Stack Q as extra channel
-    inputs = np.stack([inputs, Q], axis=1)  # shape: (samples, 2, features); features: position, charge
+    # shape: (timestep, dim+1, features); features: position, charge
+    if nDim == 1:
+        inputs = np.stack([inp, Q], axis=1)  
+    else:
+        Q_new = Q[:, np.newaxis, :] # (timestep, 1, position)
+        inputs = np.concatenate((inp, Q_new), axis=1)
 
-    # Shuffle samples
+    # Shuffle timestep
     perm = np.random.permutation(inputs.shape[0])
-    inputs = inputs[perm]      # shape: (samples, 2, features)
-    outputs = outputs[perm]    # shape: (samples, 1, field)
+    inputs = inputs[perm]      # shape: (timestep, dim+1, features)
+    outputs = outputs[perm]    # shape: (timestep, dim, field)
 
     # Normalize
     inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
-    outputs, mean, std = normalize_global_zscore(outputs)
-
+    outputs[:, 0, :], meanEx, stdEx = normalize_global_zscore(outputs[:, 0, :])
+    if nDim == 2:
+         inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
+         outputs[:, 1, :], meanEy, stdEy = normalize_global_zscore(outputs[:, 1, :])
 
     with h5py.File(dataFile, "w") as dataset:
         infoParams = {
             "nDim": nDim,
-            "output_mean": mean,
-            "output_std": std,
             "input_keys": input_keys,
             "output_keys": output_keys,
             "input_shape": inputs.shape,
@@ -189,6 +197,16 @@ def createDatasetFromPIC(picFile: str,
             "outType" : outType,
             "outScaling": outScaling,
         }
+        if nDim == 1:
+            infoParams.update({
+                "output_mean": meanEx,
+                "output_std": stdEx
+                })
+        else:
+            infoParams.update({
+                "output_mean": (meanEx, meanEy),
+                "output_std": (stdEx, stdEy)
+                })
         for name, val in infoParams.items():
             try:
                 dataset.create_dataset(f"infos/{name}", data=np.asarray(val))
