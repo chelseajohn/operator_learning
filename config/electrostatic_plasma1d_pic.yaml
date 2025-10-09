@@ -19,14 +19,7 @@ data:
   trainRatio: 0.8
   batchSize: 20
   sampling_mode: None  # [fixed, ordered, random]
-  pad_to_fullGrid: false
-  use_fixedPatch_startIdx: false
-  nPatch_per_sample: 1
-  use_minLimit: false
-  padding : [0,0,0,0]
-  add_fullGrid: false
-  # slices: 
-  # patch_startIdx: 
+ 
 
 model:
   da: 2
@@ -66,7 +59,7 @@ loss:
   # absolute: false
   
 parallel_strategy:
-  ddp: false                     # Distributed Data Parallel
+  ddp: False                     # Distributed Data Parallel
   gpus_per_node: 4
 
 train:
