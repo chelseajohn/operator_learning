@@ -1,5 +1,6 @@
 scripts/launch_scripts
 scripts/eval*
+scripts/profile/logs
 __pycache__/
 rbc_variables.sh
 setup.sh

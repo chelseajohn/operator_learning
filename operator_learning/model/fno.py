@@ -107,9 +107,9 @@ class FNO(nn.Module):
 
         # DSE not implemented for 3D
         self.use_dse = use_dse
-        self.dataset = dataset
         self.dataClass = dataClass
-
+        self.dataset = dataset if dataClass == 'rbc' else None
+        
         if use_dse:
             transformer = VandermondeTransform(kX=kX, kY=kY, dataset=dataset, dataClass=dataClass, dim=n_dims)
         else:
