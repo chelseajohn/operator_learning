@@ -152,7 +152,7 @@ def sliceToStr(s:slice):
 # Script execution
 # -----------------------------------------------------------------------------
 dataset = HDF5Dataset(dataFile)
-model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True)
+model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='rbc')
 os.makedirs(evalDir, exist_ok=True)
 
 nSamples = dataset.infos["nSamples"][()]
