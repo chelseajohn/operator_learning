@@ -98,6 +98,7 @@ class FNO(nn.Module):
                  iZEnd=None,
                  dataset=None,
                  dataClass='pic',
+                 device='cpu',
                  **kwargs
                  ):
         
@@ -112,7 +113,7 @@ class FNO(nn.Module):
         self.dataset = dataset if dataClass == 'rbc' else None
         
         if use_dse:
-            transformer = VandermondeTransform(kX=kX, kY=kY, dataset=dataset, dataClass=dataClass, dim=n_dims)
+            transformer = VandermondeTransform(device=device, kX=kX, kY=kY, dataset=dataset, dataClass=dataClass, dim=n_dims)
         else:
            transformer = None
    

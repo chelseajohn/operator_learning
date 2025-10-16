@@ -40,7 +40,8 @@ print(f'Using device: {device}')
 
 # FNO model
 model = FNO(**configs['model']).to(device)
-input = torch.rand(1, 5, 256, 256, 64).to(device)
+# change according to model 
+input = torch.rand(1, 5, 256, 256, 64).to(device)  
 input_shape = (1, 5, 256, 256, 64)
 print(f"For FNO model: {config['model']}\nusing input of {input_shape}")
 
@@ -50,13 +51,25 @@ torch_macs = torchprofile.profile_macs(model, input)
 custom_flops = sum(flop_wrappers.flop_counter.values()) 
 custom_macs = custom_flops/2
 total_macs = torch_macs + custom_macs
-print('*' * 120)
-print(f'Torchprofile MAC: {torch_macs}')
-print(f'Custom Operation: {flop_wrappers.flop_counter}')
-print(f'Custom FLOP: {custom_flops}')
-print(f'Total MAC: {total_macs}')
-print(f'Total FLOP: {2*total_macs/10**12} TFLOP')
-print('*' * 120)
+
+data = [
+    ["Custom Operations", f"{flop_wrappers.flop_counter}"],
+    ["Torchprofile MAC", f"{torch_macs:,}"],
+    ["Custom MAC", f"{custom_macs:,}"],
+    ["Torchprofile FLOP", f"{torch_macs * 2:,}"],
+    ["Custom FLOP", f"{custom_flops:,}"],
+    ["Total MAC", f"{total_macs:,}"],
+    ["Total FLOP", f"{2 * total_macs / 10**12:.4f} TFLOP"],
+]
+
+# Print formatted table
+print("=" * 80)
+print(f"{'Metric':<30} | {'Value':>45}")
+print("-" * 80)
+for metric, value in data:
+    print(f"{metric:<30} | {value:>45}")
+print("=" * 80)
+
 
 # calcflops
 flops, macs, params = calculate_flops(model=model, 

@@ -29,6 +29,8 @@ parser.add_argument(
 parser.add_argument(
     "--lossesFile", default=FourierNeuralOperator.LOSSES_FILE, help='base text file to write the loss')
 parser.add_argument(
+    "--benchmark", action="store_true", help="benchmark run")
+parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
 args = parser.parse_args()
 
@@ -48,8 +50,9 @@ configs = {name: config.get(name) for name in (sections)}
 FourierNeuralOperator.TRAIN_DIR = args.trainDir
 FourierNeuralOperator.LOSSES_FILE = args.lossesFile
 FourierNeuralOperator.USE_TENSORBOARD = True if not args.disableTensorboard else False
+benchmark = True if args.benchmark else False
 
-model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False)
+model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False, benchmark=benchmark)
 model.learn(args.epochs, args.saveInterval)
 
 if torch.distributed.is_initialized():

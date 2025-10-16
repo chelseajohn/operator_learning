@@ -78,7 +78,7 @@ if args.evalOnly:
     # FNO model
     model = FNO(**config['model']).to(device)
     input = torch.rand(*args.input_shape).to(device)
-    activities = [ProfilerActivity.CUDA, ProfilerActivity.CPU, ] 
+    activities = [ProfilerActivity.CUDA] # ProfilerActivity.CPU
     sort_by_keyword = str(device)+ "_time_total"
     fno_schedule = schedule(skip_first=0, wait=1, warmup=1, active=3, repeat=1)
 

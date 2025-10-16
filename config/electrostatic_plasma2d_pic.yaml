@@ -1,34 +1,34 @@
 simu:
-  picFile: electrostatic_plasma1D.h5
-  nDim: 1
+  picFile: electrostatic_plasma2D.h5
+  nDim: 2
 
 sample:
-  iEnd: 200
+  iEnd: 600
   step: 1
 
 data:
   dataClass: pic
   outType: solution
   outScaling: 1
-  space_dim: 1
+  space_dim: 2
   xStep: 1
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: pic_electrostatic_plasma1D.h5
+  dataFile: pic_electrostatic_plasma2D.h5
   trainRatio: 0.8
-  batchSize: 20        # Global Batch size
+  batchSize:  1        # Global Batch size 
   sampling_mode: None  # [fixed, ordered, random]
  
 
 model:
-  da: 2
-  du: 1
+  da: 3
+  du: 2
   dv: 32
   kX: 16
-  kY: None
+  kY: 16
   kZ: None
-  n_dims: 1
+  n_dims: 2
   n_layers: 4
   bias: false
   non_linearity: gelu
@@ -41,6 +41,8 @@ model:
   get_subdomain_output: false             # set to true only for inference
   iXBeg: 0
   iXEnd: 0
+  iYBeg: 0
+  iYEnd: 0
 
 optim:
   name: adam
@@ -59,21 +61,21 @@ loss:
   # absolute: false
   
 parallel_strategy:
-  ddp: true                    # Distributed Data Parallel
+  ddp: false                  # Distributed Data Parallel
   gpus_per_node: 4
 
 train:
-  trainDir: PIC1D_DDP
-  epochs: 5                     # nEpochs
+  trainDir: PIC2D
+  epochs: 10                     # nEpochs
   checkpoint: None
   saveInterval: 5
-  disableTensorboard: true
+  disableTensorboard: false
 
 eval:
   runId: 1
   imgExt: png
-  evalDir: eval1D
-  dim: 1
+  evalDir: eval2D
+  dim: 2
   kc : 0.5
   NG : 32
   T: 5
@@ -81,11 +83,13 @@ eval:
   Vt: 1
   nParticle: 50
   Qm : -1
-  alpha: 0.5
-
+  alpha: 0.01
+  
 profile:
   enableProfiler: false
   profiler: nsys
   profileDir: nsysProf
   evalOnly: false
-  input_shape: [1,2,10000]   # relevant only if eval_only=true
+  input_shape: [1,3,10000]   # relevant only if eval_only=true
+
+ 
