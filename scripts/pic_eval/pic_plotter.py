@@ -1,18 +1,19 @@
 import sys
 from pathlib import Path
-base_path = Path(__file__).resolve().parents[1]
+base_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(base_path))
 import numpy as np
 import time
 from scipy import sparse
 import matplotlib.pyplot as plt
+import h5py
 from initial_conditions import InvTransSampling
-from dynamics import toPeriodic, accelerate, accelerateML, move, push
+from dynamics import toPeriodic, accelerate, accelerateML, move, push, toPeriodicND, toPeriodicNDTranspose
 from field import field
 from interpolation import interpMatrix, interpolate
 from landau_decay import period, decayRate
 from energy import potential
-
+from operator_learning.data.pic_dataset import normalize_per_sample
 
 class PICVisualizer:
     def __init__(self, args):
@@ -30,13 +31,20 @@ class PICVisualizer:
         self.DT = args.dt
         self.T = args.T
         self.VT = args.Vt
-        self.k = args.kc
-        self.L = 2*np.pi/self.k                                             # Length of the container
-        self.NT = int(self.T/self.DT)                                       # number of time steps
-        self.Q = self.L/ (self.QM * self.N)                 # Charge of a particle
-        self.dx = self.L / self.NG         
-        self.rho_back = - self.Q * self.N / self.L     # background rho                                 # cell length
-        self.times = np.linspace(0, self.NT * self.DT, self.NT)
+        self.NT = int(self.T/self.DT) 
+        self.times = np.linspace(0, self.NT * self.DT, self.NT)   # number of time steps
+        self.dim = args.dim
+        self.k = np.array([args.kc]*self.dim)
+        self.L = 2*np.pi/self.k                                   # Length of the container  
+        self.dx = np.array(self.L / self.NG)                      # cell length        
+        self.alpha = args.alpha
+        
+        if self.dim == 1:                                                             
+            self.Q = self.L[0]/ (self.QM * self.N)                                 # Charge of a particle                                                    
+            self.rho_back = - self.Q * self.N / self.L[0]                          # background rho     
+        else:
+            self.Q = self.L[0] * self.L[1] / (self.QM * self.N)  
+            self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1])
        
 
         # Set matplotlib defaults (better figures)
@@ -90,7 +98,7 @@ class PICVisualizer:
         charge = np.full(pos.shape[1], -4 * np.pi, dtype=np.float32)
 
         # Initial particle positions and velocities
-        xt = InvTransSampling(alpha=0.5, k=self.k, L=self.L, N=self.N)
+        xt = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
         vp = np.random.randn(self.N)
         wp = 1.0
 
@@ -103,7 +111,6 @@ class PICVisualizer:
         for it in range(self.NT):
             # Enforce periodic boundary conditions
             xp = toPeriodic(xt, self.L)
-
 
             # Store particle positions
             pos[it, :] = xp.astype(np.float32)
@@ -120,13 +127,13 @@ class PICVisualizer:
             else:
                 t0 = time.time()
                 # Interpolation: particle -> grid
-                M = interpMatrix(XP=xp, wp=1, DX=self.dx, N=self.N, NG=self.NG, p=p)
-                rho = interpolate(M=M, DX=self.dx, NG=self.NG, Q=self.Q, rho_back=self.rho_back)
+                M = interpMatrix(XP=xp, wp=1, DX=self.dx, N=self.N, NG=self.NG, p=p, L=self.L, dim=self.dim)
+                rho = interpolate(M=M, DX=self.dx, L=self.L, NG=self.NG, Q=self.Q, rho_back=self.rho_back, dim=self.dim)
 
                 # Compute fields
-                phi, Eg = field(rho=rho, L=self.L)
+                phi, Eg = field(rho=rho, L=self.L, dim=self.dim)
                 
-                a, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it)
+                a, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
                 times_acc.append(time.time() - t0)
 
             # Update velocities and kinetic energy
@@ -139,7 +146,7 @@ class PICVisualizer:
             Egp = np.sum(Eout[it, :] ** 2) * self.L / self.N
 
             # Compute potential energy
-            #Epotential = potential(rho=rho, phi=phi, dx=self.dx)
+            # Epotential = potential(rho=rho, phi=phi, dx=self.dx, dim=self.dim)
             Epotential = 0.5 * Egp
             
             # Append energies and momentum
@@ -151,6 +158,92 @@ class PICVisualizer:
 
         time_acc_mean = np.round(np.mean(times_acc)*(10**6),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} microsec")
+
+        return xp, vp, wp, E, Ek, Ep, momentum, Exp, time_acc_mean
+
+    def pic2D(self, ml_acc: bool = False, model = None, data_file = None):
+        # Storage arrays
+        pos = np.zeros([self.NT, self.N, 2], dtype=np.float32)
+        Eout = np.zeros([self.NT, self.N, 2], dtype=np.float32)
+        p = np.arange(self.N, dtype=int)
+        # Build Q-charge  array
+        charge = np.full((1, 1, pos.shape[1]), self.Q*self.N, dtype=np.float32)
+
+        # Initial particle positions and velocities
+        xpn, vpn = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
+        xp, vp = np.transpose(xpn), np.transpose(vpn)
+        wp = 1.0
+
+        # Mean and Std of training output data
+        if data_file is not None:
+            data = h5py.File(data_file, 'r')
+            data_output_mean = data['infos']['output_mean'][()]
+            data_output_std = data['infos']['output_std'][()]
+
+        # Energy and momentum tracking
+        Ek, Ep, Exp, E, momentum = [], [], [], [], []
+         # Time tracking
+        times_acc = []
+     
+        for it in range(self.NT):
+           
+            # Acceleration
+            if ml_acc and model is not None:
+                t0 = time.time()
+                # Enforce periodic boundary conditions
+                xp = toPeriodicND(xp, self.L, dim=self.dim) # [particle, channel]
+                # Stack pos and charge
+                xt = np.transpose(xp)  # [channel, particle]
+                positions = xt[None, :, :]
+                positions[:, 0, :] = normalize_per_sample(positions[:, 0, :])
+                positions[:, 1, :] = normalize_per_sample(positions[:, 1, :])
+                inputs = np.concatenate([positions, charge], axis=0) # [batch=1, channel=3, particles]
+                prediction = model(inputs) # [1, channel=2, particle]
+                Efieldparticle = np.swapaxes(prediction, 1, 2).squeeze()  # [particles, channel=2]
+                Efieldparticle[:,0] = Efieldparticle[:,0] * data_output_std[0] + data_output_mean[0]
+                Efieldparticle[:,1] = Efieldparticle[:,1] * data_output_std[1] + data_output_mean[1]
+                Efieldparticle[:,0] = Efieldparticle[:,0] - ((1/N) * np.sum(Efieldparticle[:,0]))
+                Efieldparticle[:,1] = Efieldparticle[:,1] - ((1/N) * np.sum(Efieldparticle[:,1]))
+                a = accelerateML(E=Efieldparticle, wp=wp, QM=self.QM)
+                times_acc.append(time.time() - t0)
+                vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
+            else:
+                t0 = time.time()
+                xp = toPeriodicNDTranspose(xpn, self.L, dim=self.dim)
+                # Interpolation: particle -> grid
+                M = interpMatrix(XP=xp, wp=1, DX=self.dx, N=self.N, NG=self.NG, p=p, L=self.L, dim=self.dim)
+                rho = interpolate(M=M, DX=self.dx, L=self.L, NG=self.NG, Q=self.Q, rho_back=self.rho_back, dim=self.dim)
+
+                # Compute fields
+                phi, Eg = field(rho=rho, L=self.L, dim=self.dim)
+                pos[it, :, :] = np.transpose(xpn.astype(np.float32))
+                a, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
+                Efieldparticle = Eout[it,:,:].squeeze()
+                times_acc.append(time.time() - t0)
+                # Update velocities and kinetic energy
+                vp, kinetic = push(vp=vpn, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
+
+
+            # Update positions and weights
+            xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.L, it=it)
+
+            # Electric field energy
+            Egp = np.sum(Efieldparticle[:,1]**2) * (self.L[0] * self.L[1]) / self.N
+   
+            # Compute potential energy
+            Epotential = np.sum(Efieldparticle[:,0]**2 + Efieldparticle[:,1]**2) * 0.5 * (self.L[0] * self.L[1]) / self.N
+            
+            # Append energies and momentum
+            Ek.append(kinetic)
+            Ep.append(Epotential)
+            E.append(kinetic + Epotential)
+            Exp.append(Egp)
+            momx = np.sum(self.Q * vp[:,0] / self.QM)
+            momy = np.sum(self.Q * vp[:,1] / self.QM)
+            momentum.append((np.sqrt(momx**2 + momy**2)))
+
+        time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
+        print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
 
         return xp, vp, wp, E, Ek, Ep, momentum, Exp, time_acc_mean
 
@@ -248,8 +341,8 @@ class PICVisualizer:
 
     def landau_decay(self, phiMax, phiMaxPred=None):
         a = np.linspace(0, (self.NT - 1) * self.DT, self.NT)
-        pp = period(self.k)
-        b = phiMax[int(pp // (2 * self.DT))] * np.exp((a[0:2000] - pp / 2) * decayRate(self.k))
+        pp = period(self.k[0])
+        b = phiMax[int(pp // (2 * self.DT))] * np.exp((a[0:2000] - pp / 2) * decayRate(self.k[0]))
         plt.figure()
         filename = self._img_path("landau_decay_rateRef")
         plt.plot(a, phiMax, label=r'$\int ERef_x^2 dV$', color='blue')
@@ -264,5 +357,97 @@ class PICVisualizer:
         plt.grid(True)
         plt.tight_layout()
         plt.savefig(f"{self.eval_dir}/{filename}", dpi=200)
+        plt.clf()
+        return filename
+
+    def visualize_spatial_comparison(self, true_positions, predicted_positions, true_efield, predicted_efield, timestep, output_filename):
+        """
+        Creates a 2x2 grid of plots showing particle positions colored by E-field values.
+        Top row compares Ex (Predicted vs. True), Bottom row compares Ey.
+        Crucially, it uses a shared color scale for each row to allow direct comparison.
+        """
+        # Use a diverging colormap, which is great for fields (positive/negative values)
+        cmap = 'coolwarm'
+        marker_size = 1 # Use a small marker size for 100k points
+
+        # --- 1. Determine the shared color range for Ex and Ey ---
+        # For Ex, find the min/max across both predicted and true values
+        vmin_x = min(predicted_efield[:, 0].min(), true_efield[:, 0].min())
+        vmax_x = max(predicted_efield[:, 0].max(), true_efield[:, 0].max())
+        
+        # For Ey, do the same
+        vmin_y = min(predicted_efield[:, 1].min(), true_efield[:, 1].min())
+        vmax_y = max(predicted_efield[:, 1].max(), true_efield[:, 1].max())
+
+        # --- 2. Create the 2x2 plot grid ---
+        fig, axes = plt.subplots(2, 2, figsize=(13, 12), dpi=150)
+        fig.suptitle(f'Spatial E-Field Comparison for Timestep {timestep}', fontsize=20)
+
+        # --- 3. Plot the Ex comparison (Top Row) ---
+        # Predicted Ex
+        sc00 = axes[0, 0].scatter(predicted_positions[:, 0], predicted_positions[:, 1], c=predicted_efield[:, 0], 
+                                cmap=cmap, vmin=vmin_x, vmax=vmax_x, s=marker_size, rasterized=True)
+        axes[0, 0].set_title('Predicted $E_x$', fontsize=14)
+        
+        # True Ex
+        sc01 = axes[0, 1].scatter(true_positions[:, 0], true_positions[:, 1], c=true_efield[:, 0], 
+                                cmap=cmap, vmin=vmin_x, vmax=vmax_x, s=marker_size, rasterized=True)
+        axes[0, 1].set_title('Ground Truth $E_x$', fontsize=14)
+
+        # Add a single colorbar for the Ex row
+        fig.colorbar(sc01, ax=axes[0, :], label='$E_x$ Value', fraction=0.046, pad=0.04)
+
+        # --- 4. Plot the Ey comparison (Bottom Row) ---
+        # Predicted Ey
+        sc10 = axes[1, 0].scatter(predicted_positions[:, 0], predicted_positions[:, 1], c=predicted_efield[:, 1], 
+                                cmap=cmap, vmin=vmin_y, vmax=vmax_y, s=marker_size, rasterized=True)
+        axes[1, 0].set_title('Predicted $E_y$', fontsize=14)
+
+        # True Ey
+        sc11 = axes[1, 1].scatter(true_positions[:, 0], true_positions[:, 1], c=true_efield[:, 1], 
+                                cmap=cmap, vmin=vmin_y, vmax=vmax_y, s=marker_size, rasterized=True)
+        axes[1, 1].set_title('Ground Truth $E_y$', fontsize=14)
+        
+        # Add a single colorbar for the Ey row
+        fig.colorbar(sc11, ax=axes[1, :], label='$E_y$ Value', fraction=0.046, pad=0.04)
+
+        # --- 5. Final plot adjustments ---
+        for ax_row in axes:
+            for ax in ax_row:
+                ax.set_xlabel('Particle X Position')
+                ax.set_ylabel('Particle Y Position')
+                ax.set_aspect('equal', adjustable='box') # Ensure correct spatial aspect ratio
+                ax.grid(True, linestyle='--', alpha=0.5)
+        filename = self._img_path(output_filename)
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)
+        plt.close()
+  
+    def twoStreamIppl(self, ExRef, ExPred = None, label='tsi'):
+        a = np.linspace(0, (self.NT - 1) * self.DT, self.NT)
+        plt.plot(a, ExRef, label=r'$\int E_{x}Ref^2 dV$')
+        if ExPred is not None:
+            plt.plot(a, ExPred, label=r'$\int E_{x}Pred^2 dV$')
+        if(label == 'tsi'):
+            gamma = 0.4952
+        else:
+            gamma = 0.356
+        filename = self._img_path("growth_rate")
+        ind = np.argmin(np.abs(a - 8.0))
+        theo_ref = np.exp(gamma * a)
+        theo_ref = (ExRef[ind]/theo_ref[ind])*theo_ref
+        plt.plot(a, theo_ref, label='predicted growth rate', color='seagreen')
+        # plt.title('Landau Damping Decay Rate, k=0.5', fontsize='14')
+        plt.yscale('log')
+        ax = plt.gca()
+        if(label == 'tsi'):
+            ax.set_ylim([1e-4,1e3])
+        else:
+            ax.set_ylim([1e-2,1e3])
+        plt.ylabel(r'$\int E_x^2 dV$', fontsize='14')
+        plt.xlabel(r'normalized time unit: $\omega_p$t', fontsize='14')
+        plt.legend()
+        plt.grid(color='gray')
+        plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)
         plt.clf()
         return filename

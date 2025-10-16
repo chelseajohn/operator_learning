@@ -1,3 +1,4 @@
+from operator_learning.utils import flop_wrappers
 import torch 
 import torch.nn as nn
 import pandas as pd
@@ -5,7 +6,7 @@ import torch.nn.functional as F
 from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer
-from operator_learning.data import VandermondeTransform
+from operator_learning.data.transforms.vandermonde import VandermondeTransform
 
 class FNOLayer(nn.Module):
 
@@ -97,6 +98,7 @@ class FNO(nn.Module):
                  iZEnd=None,
                  dataset=None,
                  dataClass='pic',
+                 device='cpu',
                  **kwargs
                  ):
         
@@ -111,7 +113,7 @@ class FNO(nn.Module):
         self.dataset = dataset if dataClass == 'rbc' else None
         
         if use_dse:
-            transformer = VandermondeTransform(kX=kX, kY=kY, dataset=dataset, dataClass=dataClass, dim=n_dims)
+            transformer = VandermondeTransform(device=device, kX=kX, kY=kY, dataset=dataset, dataClass=dataClass, dim=n_dims)
         else:
            transformer = None
    

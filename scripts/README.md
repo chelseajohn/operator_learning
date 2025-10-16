@@ -2,9 +2,7 @@
 
 The scripts facilitate training FNO models and comprehensive evaluation of trained models with visualization and analysis capabilities.
 
-## Scripts Description
-
-### `train.py`
+## Training
 Main training script for 1D/2D/3D Fourier Neural Operator models.
 
 **Features:**
@@ -27,8 +25,9 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--saveInterval`: Checkpoint saving interval (default: 100)
 - `--disableTensorboard`: Disable Tensorboard logging
 - `--lossesFile`: File to write loss values
+- `--benchmark` : To get benchmark matrices
 
-### `rbc_eval/eval{2d,3d}.py`
+## Rayleigh Benard Convection (RBC) Evaluation
 Comprehensive evaluation script for trained FNO models with detailed analysis and visualization for Rayleigh Benard Convection
 
 **Features:**
@@ -66,16 +65,16 @@ The scripts work with HDF5 datasets containing:
 - `infos`: Metadata including grid information, timesteps, and dataset parameters
 - `xGrid`, `yGrid`: Spatial grid coordinates (if available)
 
-###  `pic_eval/eval1d.py`
-Comprehensive evaluation script for trained FNO models with visualization for PIC in 1D
+## Particle In Cell (PIC) Evaluation
+Comprehensive evaluation script for trained FNO models with visualization for PIC in 1D/2D
 
 **Usage:**
 ```bash
-python eval1d.py --checkpoint model.pt 
+python eval.py --checkpoint model.pt 
 ``` 
 OR
  ```bash
- python eval1d.py --config  config.yaml
+ python eval.py --config  config.yaml
  ```
 
 **Key Parameters:**
@@ -90,6 +89,55 @@ OR
 - `--runId`: Run index for output files (default: 1)  
 - `--imgExt`: Image file extension (default: `png`)  
 - `--evalDir`: Directory to store evaluation results (default: `eval`)  
+- `--dim`: Dimension of the problem (default: 1)
+- `--alpha`: Pertubation (default: 0.5)
 - `--config`: Configuration file for evaluation parameters (default: None)  
 
 
+## Profiling & FLOP Calculation
+
+### Profile
+
+The script allows you to profile training using either Nsight Systems or Torch profile. Additionally, Torch profiler can be used to profile only inference.
+
+To launch Nsight systems do: 
+
+`nsys profile -o profile_report  python fno_profile.py --config=config.yaml`
+
+For distributed training do:
+
+```bash
+nsys profile -o nsys_report \
+    -t cuda,nvtx,osrt \
+    python -m torch.distributed.launch --nproc_per_node=4 fno_profile.py \
+        --config=config.yaml
+```
+
+Thesea are additional `nsys` args that can be used:
+```bash
+PROFILER_ARGS_NSYS=(
+-t cuda,nvtx,cudnn,cublas,mpi,ucx,osrt
+-s cpu 
+--gpu-metrics-device=all
+--stats=true 
+--capture-range=cudaProfilerApi
+--capture-range-end=stop 
+--cudabacktrace all 
+-x true 
+--cuda-memory-usage true 
+--nic-metrics true
+--export hdf,json
+-o $PROFILE_PATH
+)
+```
+
+To launch Torch profiler do:
+
+`python fno_profile.py --config=config.yaml`
+
+### FLOP/MAC Caculation
+
+The script can calculate FLOP/MAC used by the code using [torchprofile](https://github.com/zhijian-liu/torchprofile) or [calcflops](https://github.com/MrYxJ/calculate-flops.pytorch).
+
+To get FLOPS for custom operations set:
+`ENABLE_FLOP_WRAPPERS=1 python calc_flops.py --config=config.yaml`

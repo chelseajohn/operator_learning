@@ -26,7 +26,7 @@ data:
   seed: null
   dataFile: dataset_256x64_Ra1e7_dt1e-3_update.h5
   trainRatio: 0.8
-  batchSize: 20
+  batchSize: 20        # Global Batch size
   sampling_mode: None  # [fixed, ordered, random]
   pad_to_fullGrid: false
   use_fixedPatch_startIdx: false
@@ -81,9 +81,9 @@ parallel_strategy:
   gpus_per_node: 4
 
 train:
-  trainDir: trainDir
-  epochs: 10                             # nEpochs
-  checkpoint: model.pt
+  trainDir: RBC2D
+  epochs: 5                             # nEpochs
+  checkpoint: None
   saveInterval: 5
   disableTensorboard: false
 
@@ -95,3 +95,9 @@ eval:
   tSteps: 1
   model_dt: 1e-3
  
+profile:
+  enableProfiler: false
+  profiler: nsys
+  profileDir: nsysProf
+  evalOnly: false
+  input_shape: [1,4,256,64]   # relevant only if eval_only=true

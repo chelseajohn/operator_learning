@@ -14,7 +14,8 @@ def accelerate(M: np.ndarray,
                Eout: np.ndarray, 
                wp: float, 
                QM: float,
-               it: int):
+               it: int,
+               dim: int):
     """
     Compute particle acceleration from grid electric field and store E at the current timestep.
 
@@ -25,14 +26,25 @@ def accelerate(M: np.ndarray,
         wp (float): Particle weights.
         QM (float): Charge-to-mass ratio (q/m).
         it (int): Current timestep index.
+        dim (int): dimension (1D/2D)
 
     Returns:
         a (np.ndarray): Particle accelerations.
         Eout (np.ndarray): Updated electric field history.
     """
-    Etemp = M * E
-    a = np.transpose(Etemp) * QM / wp
-    Eout[it, :] = Etemp.astype(np.float32)
+    if dim == 1:
+        Etemp = M * E
+        a = np.transpose(Etemp) * QM / wp
+        Eout[it, :] = Etemp.astype(np.float32)
+    else:
+        Extemp = M * E[0].flatten()
+        Eytemp = M * E[1].flatten()
+        a1 = np.transpose(Extemp) * QM / wp
+        a2 = np.transpose(Eytemp) * QM / wp
+        Eout[it,:,0] = Extemp.astype(np.float32)
+        Eout[it,:,1] = Eytemp.astype(np.float32)
+        a = np.array([a1, a2])
+    
     return a, Eout
 
 
@@ -101,7 +113,7 @@ def move(xp: np.ndarray, vp: np.ndarray,
         return xp + vp * DT, wp + DT * findsource(xp + vp * DT / 2, vp, L, it + 0.5, DT)
 
 
-def toPeriodic(x: np.ndarray, L: float, discrete: bool = False):
+def toPeriodic(x: np.ndarray, L: float, discrete: bool=False):
     """
     Apply periodic boundary conditions to particle positions.
 
@@ -120,4 +132,14 @@ def toPeriodic(x: np.ndarray, L: float, discrete: bool = False):
     else:
         out = (x >= L)
     x[out] = x[out] - L
+    return x
+
+def toPeriodicND(x: np.ndarray, L: float, dim :int=2, discrete: bool=False):
+    for i in range(dim):
+        x[:,i] = toPeriodic(x[:,i], L[i], discrete)
+    return x
+
+def toPeriodicNDTranspose(x: np.ndarray, L: float, dim :int=2, discrete: bool=False):
+    for i in range(dim):
+        x[i] = toPeriodic(x[i], L[i], discrete)
     return x

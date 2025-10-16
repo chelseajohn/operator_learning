@@ -1,3 +1,6 @@
+import os
+if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
+    from operator_learning.utils import flop_wrappers
 import torch
 import torch.nn as nn
 
