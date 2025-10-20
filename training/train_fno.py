@@ -360,7 +360,6 @@ class FourierNeuralOperator:
                 self.profiler.stop()
             nvtx.range_pop() # end epoch
           
-
     def valid(self):
         model = self.model.eval()
         nBatches = len(self.valLoader)
@@ -381,7 +380,7 @@ class FourierNeuralOperator:
 
         with torch.no_grad():
             for iBatch in range(nBatches):
-                # # Batch 
+                # Batch 
                 # if self.enable_profile:
                 #     nvtx.range_push(f"ValEpoch_{self.epochs}_Batch_{iBatch}")
                 if self.enable_profile:
@@ -492,7 +491,9 @@ class FourierNeuralOperator:
             samples_per_sec = int(total_samples/total_compute_time)
 
             data = {
-                "Metric": ["NumEpochs", "TotalEpochTime (s)", "TotalMonitorTime (s)", "TotalCheckpointTime (s)", "TotalComputeTime (s)", "TotalTimesteps", "Timesteps/s"],
+                "Metric": ["NumEpochs", "TotalEpochTime (s)", "TotalMonitorTime (s)",
+                            "TotalCheckpointTime (s)", "TotalComputeTime (s)",
+                            "TotalTimesteps", "Timesteps/s"],
                 "Value": [  round(num_epochs,0),
                             round(total_epoch_time, 3),
                             round(total_monitor_time, 3),
