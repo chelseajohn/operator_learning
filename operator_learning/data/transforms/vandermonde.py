@@ -1,105 +1,121 @@
 import torch
 import numpy as np
+from operator_learning.utils.misc import print_rank0
 
-# class for 2-dimensional Fourier transforms on a nonequispaced lattice of data
-# ref: https://github.com/camlab-ethz/DSE-for-NeuralOperators/blob/main/ShearLayer/fno_dse.py
 class VandermondeTransform:
-    def __init__(self, dataset, kX, kY, device):
-        self.kX = kX
-        self.kY = kY
-
-        self.x_positions = []
-        self.y_positions = []
-        self.Vxt_slices = []
-        self.Vyt_slices = []
-        self.Vxc_slices = []
-        self.Vyc_slices = []
-
+    """
+    Class for 1,2-dimensional Fourier transforms on a nonequispaced lattice of data
+    ref: https://github.com/camlab-ethz/DSE-for-NeuralOperators/blob/main/ShearLayer/fno_dse.py 
+    """
+    def __init__(self, device, kX, kY=None, dataset=None, dataClass='pic', dim=1, dtype=torch.complex64):
         self.device = device
-        
-        # logging.info("Initializing Vandermonde Transform")
+        self.dtype = dtype
+        self.kX = kX
+        self.kY = kY if kY is not None else None
+        assert dim in (1, 2), "dim must be 1 or 2"
+        self.dim = dim
+        self.dataset = dataset
+        self.dataClass = dataClass
 
-        for iPatch, (sX, sY) in enumerate(dataset.slices):
-            x_start, y_start = dataset.patch_startIdx[iPatch]
-            padding = dataset.padding.copy()
+        if dim == 1:
+            # [1, kX, 1]
+            self._X = torch.arange(self.kX, dtype=torch.float32, device=device)[None, :, None]
+        else:
+            # [1, 2*kX, 1]
+            self._X = torch.cat((
+                torch.arange(self.kX, dtype=torch.float32, device=device),
+                torch.arange(start=-self.kX, end=0, dtype=torch.float32, device=device)
+            ), dim=0)[None, :, None]
 
-            # Adjust padding to ensure valid indices
-            padding[0] = 0 if x_start == 0 or (x_start - padding[0]) < 0 else padding[0]
-            padding[1] = 0 if (x_start + sX + padding[1]) >= dataset.nX else padding[1]
-            padding[2] = 0 if y_start == 0 or (y_start - padding[2]) < 0 else padding[2]
-            padding[3] = 0 if (y_start + sY + padding[3]) >= dataset.nY else padding[3]
+            # [1, 2*kY-1, 1]
+            self._Y = torch.cat((
+                torch.arange(self.kY, dtype=torch.float32, device=device),
+                torch.arange(start=-(self.kY-1), end=0, dtype=torch.float32, device=device)
+            ), dim=0)[None, :, None]
 
-            # Extract and normalize grid positions
-            xPos = torch.tensor(dataset.grid[0][x_start - padding[0]: x_start + sX + padding[1]]).clone().detach()
-            yPos = torch.tensor(dataset.grid[1][y_start - padding[2]: y_start + sY + padding[3]]).clone().detach()
+    def tensor_info(self, name, tensor):
+        """Utility: print_rank0 shape, dtype, and memory size."""
+        numel = tensor.numel()
+        bytes_per_elem = tensor.element_size()
+        mem_mb = numel * bytes_per_elem / (1024 ** 2)
+        print_rank0(f"{name}: shape={tuple(tensor.shape)}, dtype={tensor.dtype}, size={mem_mb:.3f} MB")
+
+    def make_1Dmatrix(self, x_data):
+        """Generates Vandermonde 1D matrices for forward and inverse transforms."""
+        with torch.no_grad():
+            # x_data: [B, particle], V: [B, kX, particle]
+            nParticle = x_data.shape[-1]
+
+            if self.dataClass == 'rbc':
+                xPos = torch.tensor(self.dataset.grid[0], dtype=torch.float32, device=self.device).repeat(x_data.shape[0], 1)
+            else:
+                xPos = x_data.real.to(self.device)
+
+            # scaling btw 0 and 2*pi
+            xPos = ((xPos - xPos.min()) / xPos.max()) * 2 * np.pi
+            V = torch.exp(-1j * ((self._X - int(self.kX/2))* xPos[:, None, :])).to(self.dtype) # [1, kX, 1] x [B, 1, nX]
             
-            xPos = (xPos - xPos.min()) / (xPos.max() + 1) * 2 * np.pi
-            yPos = (yPos - yPos.min()) / (yPos.max() + 1) * 2 * np.pi
+            norm = torch.sqrt(torch.tensor(nParticle, dtype=torch.int, device=self.device))
+            forward_mat = (V / norm).to(self.device)
 
-            self.x_positions.append(xPos)
-            self.y_positions.append(yPos)
-            
-            # logging.info(f"Patch {iPatch}: xPos size: {len(xPos)}, yPos size: {len(yPos)}")
-            
-            vxt, vyt, vxc, vyc = self.make_matrix(xPos, yPos)
-            self.Vxt_slices.append(vxt)
-            self.Vyt_slices.append(vyt)
-            self.Vxc_slices.append(vxc)
-            self.Vyc_slices.append(vyc)
+        self.forward_mat = forward_mat
 
-  
-    def find_index(self, sX, sY):
-        """Finds the index of the transformation matrices corresponding to a given grid size."""
-        for i, (x, y) in enumerate(zip(self.x_positions, self.y_positions)):
-            if len(x) == sX and len(y) == sY:
-                return i
-        return None
-          
+        return self.forward_mat
+    
+    def make_2Dmatrix(self, x_data, y_data):
+        """Generates Vandermonde 2D matrices for forward and inverse transforms."""
+        with torch.no_grad():
+            # x_data: [B, particle], y_data: [B, particle] 
+            if self.dataClass == 'rbc':
+                xPos = torch.tensor(self.dataset.grid[0], dtype=torch.float32, device=self.device).repeat(x_data.shape[0], 1)
+                yPos = torch.tensor(self.dataset.grid[1], dtype=torch.float32, device=self.device).repeat(y_data.shape[0], 1)
+            else:
+                xPos = x_data.real.to(self.device)
+                yPos = y_data.real.to(self.device)
 
-    def make_matrix(self, x_positions, y_positions):
-        """Generates Vandermonde matrices for forward and inverse transforms."""
-        sX, sY = len(x_positions), len(y_positions)
+            # scaling btw 0 and 2*pi
+            xPos = ((xPos - xPos.min()) / xPos.max()) * 2 * np.pi
+            yPos = ((yPos - yPos.min()) / yPos.max()) * 2 * np.pi
 
-        V_x = torch.zeros([self.kX, sX], dtype=torch.cfloat).to(self.device)
-        for row in range(self.kX):
-             for col in range(sX):
-                V_x[row, col] = torch.exp(-1j * row * x_positions[col]) 
-        V_x = V_x / np.sqrt(sX)
- 
-        V_y = torch.zeros([2 * self.kY, sY], dtype=torch.cfloat).to(self.device)
-        for row in range(self.kY):
-             for col in range(sY):
-                V_y[row, col] = torch.exp(-1j * row *  y_positions[col]) 
-                V_y[-(row+1), col] = torch.exp(-1j * (sY - row - 1) * y_positions[col]) 
-        V_y = V_y / np.sqrt(sY)
+            # ToDO: implement for RBC
+            m = (self.kX*2)*(self.kY*2-1)
+            X_mat = torch.matmul(self._X, xPos[:,None,:]).repeat(1, (self.kY*2-1), 1)
+            Y_mat = torch.matmul(self._Y, yPos[:,None,:]).repeat(1, 1, self.kX*2).reshape(yPos.shape[0], m, yPos.shape[-1]) 
 
-        return V_x.T, V_y.T, V_x.conj(), V_y.conj()
+            forward_mat = ((torch.exp(-1j* (X_mat+Y_mat))).to(self.dtype)/ xPos.shape[-1]).to(self.device) # [B, m, particle]
+
+        self.forward_mat = forward_mat
+       
+        return self.forward_mat
 
     def forward(self, data):
+
         """Computes the forward DSE transform."""
-        self.idx = self.find_index(data.shape[-1], data.shape[-2])
-        assert self.idx is not None, "Could not find grid for data!"
-        
-        data_fwd = torch.transpose(
-                torch.matmul(
-                    torch.transpose(
-                        torch.matmul(data, self.Vxt_slices[self.idx]),
-                    2, 3),
-                self.Vyt_slices[self.idx]),
-                2, 3)
+
+        if self.dim == 1:
+            V = self.make_1Dmatrix(x_data=data[:, 0, :]) # [B, kX, particle]
+           
+        else:
+            # ToDO: implement for RBC
+            V = self.make_2Dmatrix(x_data=data[:,0,:], y_data=data[:,1,:])  # [B, m, particle]
+
+        # 1D: [B, C, particle] x [B, particle, kX], 2D: [B, C, particle] x [B, particle, m]
+        data_fwd = torch.bmm(data, V.permute(0,2,1))  
 
         return data_fwd
     
     def inverse(self, data):
         """Computes the inverse Fourier transform."""
-        assert hasattr(self, 'idx'), "Forward transform must be called before inverse!"
-        
-        data_inv = torch.transpose(
-                torch.matmul(
-                    torch.transpose(
-                        torch.matmul(data, self.Vxc_slices[self.idx]),
-                    2, 3),
-                self.Vyc_slices[self.idx]),
-                2, 3)
-        
+        if self.dim == 1:
+            # Vc: [B, kX, particle]
+            Vc =  torch.conj(self.forward_mat)
+        else:
+            # ToDO: implement for RBC
+            # Vc: [B, m, particle] 
+            Vc = torch.conj(self.forward_mat) 
+
+        # 1D data: [B, C, kX], 2D data: [B, C, m]
+        data_inv = torch.matmul(data, Vc) 
+    
         return data_inv
+

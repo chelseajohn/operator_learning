@@ -45,7 +45,7 @@ parallel_strategy:
 
 ### 🖥️ Launching DDP Jobs via SLURM
 
-You can launch distributed jobs using `torchrun` within a SLURM environment:
+Distributed jobs can be launched using `torchrun` within a SLURM environment:
 
 ```bash
 ##### Network parameters #####
@@ -65,6 +65,20 @@ srun python -u -m torch.distributed.run   \
     $python_file  
 ```
 
+## 🔍 Profiling 
+
+To enable profiling using Nsight systems or Torch profiler add a `profile` section into the config:
+
+```bash
+profile:
+  enableProfiler: True
+  profiler: nsys               # or torch
+  profileDir: profileLog
+  evalOnly: false             # profile only inference using torch profiler 
+  input_shape: [1,3,10000]    # relevant only if eval_only=true
+```
+
 ## Problems Solved
 
 - **Rayleigh-Bénard convection** in 2D/3D using FNO, with datasets generated via the pseudo-spectral solver [Dedalus](https://dedalus-project.readthedocs.io/en/latest/) for 2D and [pySDC](https://zenodo.org/records/15196003) for 3D.
+- **Particle-In-Cell** (1D/2D) algorithm using FNO for electric field prediction

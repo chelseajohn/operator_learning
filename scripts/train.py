@@ -14,7 +14,7 @@ from operator_learning.utils.misc import readConfig
 # Script parameters
 # -----------------------------------------------------------------------------
 parser = argparse.ArgumentParser(
-    description='Train a 2D/3D FNO model on a given dataset',
+    description='Train a 1D/2D/3D FNO model on a given dataset',
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument(
     "--trainDir", default="trainDir", help="directory to store training results")
@@ -28,6 +28,8 @@ parser.add_argument(
     "--disableTensorboard", action="store_true", help="disable Tensorboard logging")
 parser.add_argument(
     "--lossesFile", default=FourierNeuralOperator.LOSSES_FILE, help='base text file to write the loss')
+parser.add_argument(
+    "--benchmark", action="store_true", help="benchmark run")
 parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
 args = parser.parse_args()
@@ -48,8 +50,9 @@ configs = {name: config.get(name) for name in (sections)}
 FourierNeuralOperator.TRAIN_DIR = args.trainDir
 FourierNeuralOperator.LOSSES_FILE = args.lossesFile
 FourierNeuralOperator.USE_TENSORBOARD = True if not args.disableTensorboard else False
+benchmark = True if args.benchmark else False
 
-model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False)
+model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False, benchmark=benchmark)
 model.learn(args.epochs, args.saveInterval)
 
 if torch.distributed.is_initialized():

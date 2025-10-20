@@ -4,10 +4,10 @@ import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from operator_learning.data.datasets.rbc2D.dedalus_prop import OutputFiles
+from operator_learning.data.problems.rbc2D.dedalus_prop import OutputFiles
 from operator_learning.utils.misc import print_rank0
 
-class HDF5Dataset(Dataset):
+class RBCDataset(Dataset):
 
     def __init__(self, dataFile, **kwargs):
         """
@@ -18,23 +18,29 @@ class HDF5Dataset(Dataset):
             
         """
         
+        
         self.file = h5py.File(dataFile, 'r')
         self.inputs = self.file['inputs']
         self.outputs = self.file['outputs']
+        self.dataClass = kwargs.get('dataClass', 'rbc')
         self.nDim = kwargs.get('space_dim', 2)
 
-
-        if self.nDim == 2:
+        if self.nDim == 1:
+            xGrid = self.grid
+        elif self.nDim == 2:
             xGrid, yGrid = self.grid
+            self.nY = yGrid.size
+            self.kY = kwargs.get('kY', 12)
         else:
             xGrid, yGrid, zGrid = self.grid
+            self.nY = yGrid.size
+            self.kY = kwargs.get('kY', 12)
             self.nZ = zGrid.size
-            self.kY = kwargs.get('kZ', 12)
+            self.kZ = kwargs.get('kZ', 12)
 
         self.nX = xGrid.size
-        self.nY = yGrid.size
         self.kX = kwargs.get('kX', 12)
-        self.kY = kwargs.get('kY', 12)
+        
   
         assert len(self.inputs) == len(self.outputs), \
             f"different sample number for inputs and outputs ({len(self.inputs)},{len(self.outputs)})"
@@ -61,7 +67,9 @@ class HDF5Dataset(Dataset):
 
     @property
     def grid(self):
-        if self.nDim == 2:
+        if self.nDim  == 1:
+            return self.infos["xGrid"][:],
+        elif self.nDim == 2:
             return self.infos["xGrid"][:], self.infos["yGrid"][:]
         else:
             return self.infos["xGrid"][:], self.infos["yGrid"][:], self.infos["zGrid"][:]
@@ -88,7 +96,11 @@ class HDF5Dataset(Dataset):
 
     def printInfos(self):
         print_rank0(f"### Dataset Infos ###")
-        if self.nDim == 2:
+        if self.nDim == 1:
+            xGrid= self.grid
+            print_rank0(f" -- grid shape : ({xGrid.size})")
+            print_rank0(f" -- grid domain : [{xGrid.min():.1f}, {xGrid.max():.1f}]")
+        elif self.nDim == 2:
             xGrid, yGrid = self.grid
             print_rank0(f" -- grid shape : ({xGrid.size}, {yGrid.size})")
             print_rank0(f" -- grid domain : [{xGrid.min():.1f}, {xGrid.max():.1f}] x [{yGrid.min():.1f}, {yGrid.max():.1f}]")
@@ -111,7 +123,7 @@ class HDF5Dataset(Dataset):
         print_rank0(f" -- outType : {infos['outType'][()].decode('utf-8')}")
         print_rank0(f" -- outScaling : {infos['outScaling'][()]:1.2g}")
 
-class DomainDataset(HDF5Dataset):
+class DomainDataset(RBCDataset):
     """
     A dataset class that supports different sampling strategies: 
     'random', 'fixed', or 'ordered' for 2-D grid data.
@@ -276,11 +288,11 @@ class DomainDataset(HDF5Dataset):
         if self.use_fixedPatch_startIdx:
             print_rank0(f" -- patch start index (per epoch): {self.patch_startIdx}")
 
-def createDataset(
+def createDatasetFromDedalus(
         dataDir, inSize, outStep, inStep, outType, outScaling, dataFile,
         verbose=False, nDim=2, **kwargs):
     assert inSize == 1, "inSize != 1 not implemented yet ..."
-    assert nDim == 2, "nDim >2 not implemented yet ..."
+    assert nDim == 2, "nDim != 2 not implemented yet ..."
     simDirsSorted = sorted(glob.glob(f"{dataDir}/simu_*"), key=lambda f: int(f.split('simu_',1)[1]))
     nSimu = int(kwargs.get("nSimu", len(simDirsSorted)))
     simDirs = simDirsSorted[:nSimu]

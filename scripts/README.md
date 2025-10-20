@@ -1,11 +1,9 @@
 # Overview
 
-The scripts facilitate training FNO models on Rayleigh-Bénard convection and comprehensive evaluation of trained models with visualization and analysis capabilities.
+The scripts facilitate training FNO models and comprehensive evaluation of trained models with visualization and analysis capabilities.
 
-## Scripts Description
-
-### `train.py`
-Main training script for 2D/3D Fourier Neural Operator models.
+## Training
+Main training script for 1D/2D/3D Fourier Neural Operator models.
 
 **Features:**
 - Supports distributed training with PyTorch
@@ -27,9 +25,10 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--saveInterval`: Checkpoint saving interval (default: 100)
 - `--disableTensorboard`: Disable Tensorboard logging
 - `--lossesFile`: File to write loss values
+- `--benchmark` : To get benchmark matrices
 
-### `eval{2d,3d}.py`
-Comprehensive evaluation script for trained FNO models with detailed analysis and visualization.
+## Rayleigh Benard Convection (RBC) Evaluation
+Comprehensive evaluation script for trained FNO models with detailed analysis and visualization for Rayleigh Benard Convection
 
 **Features:**
 - Multi-timestep autoregressive evaluation
@@ -58,30 +57,87 @@ python eval{2d,3d}.py --checkpoint model.pt --dataFile dataset.h5 --tSteps 10
 - `--subtitle`: Subtitle for contour plots (default: `(256,64)`)
 - `--config`: Configuration file for evaluation parameters
 
-### `eval_template.md`
-Markdown template for evaluation report generation. Used internally by `eval_{2d,3d}.py` to structure the evaluation results.
-
-### Evaluation Outputs 
-```
-evalDir/
-├── eval_run{runId}.md                    # Evaluation report
-├── run{runId}_D{iDec}_error_over_time.png
-├── run{runId}_D{iDec}_contour_solution.png
-├── run{runId}_D{iDec}_contour_update.png
-├── run{runId}_D{iDec}_contour_err.png
-├── run{runId}_D{iDec}_contour_ref_solution.png
-├── run{runId}_D{iDec}_contour_ref_update.png
-├── run{runId}_D{iDec}_spectrum.png
-├── run{runId}_D{iDec}_spectrum_HF.png (only for 2D)
-└── run{runId}_D{iDec}_nusPlot.png (only for 3D)
-
-```
-
-## Dataset Requirements
+**Dataset Requirements**
 
 The scripts work with HDF5 datasets containing:
 - `inputs`: Initial conditions for simulations
 - `outputs`: Target solutions or updates
 - `infos`: Metadata including grid information, timesteps, and dataset parameters
-- `xGrid`, `yGrid`: Spatial grid coordinates
+- `xGrid`, `yGrid`: Spatial grid coordinates (if available)
 
+## Particle In Cell (PIC) Evaluation
+Comprehensive evaluation script for trained FNO models with visualization for PIC in 1D/2D
+
+**Usage:**
+```bash
+python eval.py --checkpoint model.pt 
+``` 
+OR
+ ```bash
+ python eval.py --config  config.yaml
+ ```
+
+**Key Parameters:**
+- `--kc`: Wave vector (default: 0.5)  
+- `--NG`: Number of grid points (default: 32)  
+- `--T`: Total simulation time (default: 20)  
+- `--dt`: Time step size (default: 0.05)  
+- `--Vt`: Thermal velocity (default: 1)  
+- `--nParticle`: Number of simulation particles (default: 50)  
+- `--Qm`: Charge per mass (default: -1)  
+- `--checkpoint`: Model checkpoint file (default: None)  
+- `--runId`: Run index for output files (default: 1)  
+- `--imgExt`: Image file extension (default: `png`)  
+- `--evalDir`: Directory to store evaluation results (default: `eval`)  
+- `--dim`: Dimension of the problem (default: 1)
+- `--alpha`: Pertubation (default: 0.5)
+- `--config`: Configuration file for evaluation parameters (default: None)  
+
+
+## Profiling & FLOP Calculation
+
+### Profile
+
+The script allows you to profile training using either Nsight Systems or Torch profile. Additionally, Torch profiler can be used to profile only inference.
+
+To launch Nsight systems do: 
+
+`nsys profile -o profile_report  python fno_profile.py --config=config.yaml`
+
+For distributed training do:
+
+```bash
+nsys profile -o nsys_report \
+    -t cuda,nvtx,osrt \
+    python -m torch.distributed.launch --nproc_per_node=4 fno_profile.py \
+        --config=config.yaml
+```
+
+Thesea are additional `nsys` args that can be used:
+```bash
+PROFILER_ARGS_NSYS=(
+-t cuda,nvtx,cudnn,cublas,mpi,ucx,osrt
+-s cpu 
+--gpu-metrics-device=all
+--stats=true 
+--capture-range=cudaProfilerApi
+--capture-range-end=stop 
+--cudabacktrace all 
+-x true 
+--cuda-memory-usage true 
+--nic-metrics true
+--export hdf,json
+-o $PROFILE_PATH
+)
+```
+
+To launch Torch profiler do:
+
+`python fno_profile.py --config=config.yaml`
+
+### FLOP/MAC Caculation
+
+The script can calculate FLOP/MAC used by the code using [torchprofile](https://github.com/zhijian-liu/torchprofile) or [calcflops](https://github.com/MrYxJ/calculate-flops.pytorch).
+
+To get FLOPS for custom operations set:
+`ENABLE_FLOP_WRAPPERS=1 python calc_flops.py --config=config.yaml`

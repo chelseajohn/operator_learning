@@ -2,8 +2,10 @@ import torch
 from torch.utils.data import  DataLoader, random_split, Subset
 from torch.utils.data.distributed import DistributedSampler
 from collections import defaultdict
-from operator_learning.data.hdf5_dataset import HDF5Dataset, DomainDataset
+from operator_learning.data.hdf5_dataset import RBCDataset, DomainDataset
+from operator_learning.data.pic_dataset import PICDataset
 from operator_learning.utils.communication import get_world_size, get_rank
+from operator_learning.utils.misc import print_rank0
 
 def variable_tensor_collate_fn(batch):
     """
@@ -44,7 +46,8 @@ def variable_tensor_collate_fn(batch):
 
 def getDataLoaders(dataFile,
                    trainRatio=0.8, 
-                   batchSize=20, seed=None, 
+                   batchSize=20,
+                   seed=None, 
                    sampling_mode=None,
                    pad_to_fullGrid=False,
                    use_fixedPatch_startIdx=False,
@@ -52,7 +55,6 @@ def getDataLoaders(dataFile,
                    use_minLimit=False,
                    padding=[0,0,0,0], 
                    add_fullGrid=False, # to include full grid with domain grids
-                   use_distributed_sampler=False,
                    **kwargs):
 
     if sampling_mode is not None:
@@ -71,8 +73,13 @@ def getDataLoaders(dataFile,
             if use_fixedPatch_startIdx and not sampling_mode == 'ordered':
                 dataset.patch_startIdx.append((0,0))
     else:
-        dataset = HDF5Dataset(dataFile, **kwargs)
+        if kwargs.get('dataClass') == 'pic':
+            dataset = PICDataset(dataFile, **kwargs)
+        else:
+            dataset = RBCDataset(dataFile, **kwargs)
 
+    if kwargs.get('datasetOnly', False):
+        return dataset
 
     dataset.printInfos()
     
@@ -99,22 +106,24 @@ def getDataLoaders(dataFile,
         trainSet, valSet = random_split(
             dataset, [trainSize, valSize], generator=generator)
 
-    if use_distributed_sampler:
+    if torch.distributed.is_initialized():
+        local_batchSize = int(batchSize / torch.distributed.get_world_size())
         train_sampler = DistributedSampler(trainSet, num_replicas=get_world_size(), rank=get_rank(), shuffle=True)
         val_sampler = DistributedSampler(valSet, num_replicas=get_world_size(), rank=get_rank(), shuffle=False)
     else:
+        local_batchSize = batchSize
         train_sampler = None
         val_sampler = None
-
 
     if (sampling_mode == 'random' and not pad_to_fullGrid) or \
        ((sampling_mode in ['fixed', 'ordered']) and (add_fullGrid or padding != [0,0,0,0])):
         train_batchSize = len(trainSet)
         valid_batchSize = len(valSet)
     else:
-        train_batchSize = batchSize
-        valid_batchSize = batchSize
+        train_batchSize = local_batchSize
+        valid_batchSize = local_batchSize
 
+    print_rank0(f'Using GlobalBatchSize: {batchSize} and localBatchSize: {local_batchSize}')
     trainLoader = DataLoader(trainSet, batch_size=train_batchSize, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=num_workers, collate_fn=collate_fn, pin_memory=True)
     valLoader = DataLoader(valSet, batch_size=valid_batchSize, sampler=val_sampler, shuffle=False, num_workers=num_workers, collate_fn=collate_fn, pin_memory=True)
 

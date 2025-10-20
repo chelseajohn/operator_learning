@@ -1,0 +1,91 @@
+simu:
+  picFile: electrostatic_plasma1D.h5
+  nDim: 1
+
+sample:
+  iEnd: 200
+  step: 1
+
+data:
+  dataClass: pic
+  outType: solution
+  outScaling: 1
+  space_dim: 1
+  xStep: 1
+  yStep: 1
+  zStep: 1
+  seed: null
+  dataFile: pic_electrostatic_plasma1D.h5
+  trainRatio: 0.8
+  batchSize: 20        # Global Batch size
+  sampling_mode: None  # [fixed, ordered, random]
+ 
+
+model:
+  da: 2
+  du: 1
+  dv: 32
+  kX: 16
+  kY: None
+  kZ: None
+  n_dims: 1
+  n_layers: 4
+  bias: false
+  non_linearity: gelu
+  scaling_layers: 2
+  use_postfnochannel_mlp: false
+  channel_mlp_expansion: 4
+  use_skip_connection: false
+  skip_type: soft-gating
+  use_dse: true
+  get_subdomain_output: false             # set to true only for inference
+  iXBeg: 0
+  iXEnd: 0
+
+optim:
+  name: adam
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+
+lr_scheduler:
+  # scheduler: CosAnnealingLR
+  # T_max: 50000
+  scheduler: StepLR
+  step_size: 50.0
+  gamma: 0.5
+
+loss:
+  name: L1Loss
+  # absolute: false
+  
+parallel_strategy:
+  ddp: true                    # Distributed Data Parallel
+  gpus_per_node: 4
+
+train:
+  trainDir: PIC1D_DDP
+  epochs: 5                     # nEpochs
+  checkpoint: None
+  saveInterval: 5
+  disableTensorboard: true
+
+eval:
+  runId: 1
+  imgExt: png
+  evalDir: eval1D
+  dim: 1
+  kc : 0.5
+  NG : 32
+  T: 5
+  dt: 0.05
+  Vt: 1
+  nParticle: 50
+  Qm : -1
+  alpha: 0.5
+
+profile:
+  enableProfiler: false
+  profiler: nsys
+  profileDir: nsysProf
+  evalOnly: false
+  input_shape: [1,2,10000]   # relevant only if eval_only=true

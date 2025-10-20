@@ -1,3 +1,6 @@
+import os
+if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
+    from operator_learning.utils import flop_wrappers
 import torch
 import torch.nn as nn 
 import torch.nn.functional as F
@@ -12,7 +15,7 @@ class GridLinear(nn.Module):
                  bias=False, n_layers=1, non_linearity=F.gelu):
         super().__init__()
 
-        assert n_dims in (2, 3), "spatial dimension must be 2 or 3"
+        assert n_dims in (1, 2, 3), "spatial dimension must be 1, 2 or 3"
         self.n_dims = n_dims
         self.n_layers = n_layers
         hiddenSize = outSize if hiddenSize is None else hiddenSize 
@@ -24,12 +27,12 @@ class GridLinear(nn.Module):
         for i in range(n_layers):
             self.weights.append(nn.Parameter(torch.empty(layer_sizes[i + 1], layer_sizes[i])))
             if bias:
-                if n_dims == 2:
+                if n_dims == 1:
+                    self.biases.append(nn.Parameter(torch.empty(layer_sizes[i + 1], 1)))
+                elif n_dims == 2:
                     self.biases.append(nn.Parameter(torch.empty(layer_sizes[i + 1], 1, 1)))
                 else:
                     self.biases.append(nn.Parameter(torch.empty(layer_sizes[i + 1], 1, 1, 1)))
-
-        
 
         # Initialize parameters (same as in pytorch for nn.Linear)
         for i,weight in enumerate(self.weights):
@@ -42,7 +45,9 @@ class GridLinear(nn.Module):
     def forward(self, x):
         """ x[nBatch, inSize, nX, nY, (nZ)] -> [nBatch, outSize, nX, nY, (nZ)] """
 
-        if self.n_dims == 2:
+        if self.n_dims == 1:
+            einsum_str = "ij,ejx->eix"
+        elif self.n_dims == 2:
             einsum_str = "ij,ejxy->eixy"
         else:
             einsum_str = "ij,ejxyz->eixyz"

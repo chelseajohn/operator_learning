@@ -13,7 +13,7 @@ import torch
 from timeit import default_timer
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from operator_learning.data.datasets.rbc2D.dedalus_prop import computeMeanSpectrum, getModes
+from operator_learning.data.problems.rbc2D.dedalus_prop import computeMeanSpectrum, getModes
 from operator_learning.data import HDF5Dataset
 from operator_learning.utils.misc import readConfig
 from training.train_fno import FourierNeuralOperator
@@ -152,7 +152,7 @@ def sliceToStr(s:slice):
 # Script execution
 # -----------------------------------------------------------------------------
 dataset = HDF5Dataset(dataFile)
-model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True)
+model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='rbc')
 os.makedirs(evalDir, exist_ok=True)
 
 nSamples = dataset.infos["nSamples"][()]

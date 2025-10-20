@@ -1,5 +1,5 @@
 import torch
-
+import torch.nn as nn
 # Store all loss classes in a dictionary using the register decorator 
 LOSSES_CLASSES = {}
 
@@ -41,7 +41,7 @@ class LpLoss(object):
         # Assume uniform mesh
         h = 1.0 / (x.size()[1] - 1.0)
 
-        all_norms = (h**(self.d/self.p))*torch.norm(x.view(num_examples,-1) - y.view(num_examples,-1), self.p, 1)
+        all_norms = (h**(self.d/self.p))*torch.norm(x.flatten(num_examples,-1) - y.flatten(num_examples,-1), self.p, 1)
 
         if self.reduction:
             if self.size_average:
@@ -104,4 +104,43 @@ class VectorNormLoss(object):
 
     def __call__ABS(self, pred, ref):
         return torch.mean(self.vectorNorm(pred-ref))
+    
+# ------------------------------
+# Torch built-in loss wrappers
+# ------------------------------
 
+@register
+class L1Loss(nn.Module):
+    """Wrapper around torch.nn.L1Loss"""
+    def __init__(self, reduction: str = "mean", device=None):
+        super().__init__()
+        self.loss_fn = nn.L1Loss(reduction=reduction)
+
+    def __call__(self, pred, ref):
+        if pred.is_complex():
+            loss = (
+                self.loss_fn(pred.real.flatten(start_dim=1), ref.real.flatten(start_dim=1))
+                + self.loss_fn(pred.imag.flatten(start_dim=1), ref.imag.flatten(start_dim=1))
+            )
+        else:
+            loss = self.loss_fn(pred.flatten(start_dim=1), ref.flatten(start_dim=1))
+
+        return loss
+    
+@register
+class MSELoss(nn.Module):
+    """Wrapper around torch.nn.MSELoss"""
+    def __init__(self, reduction: str = "mean", device=None):
+        super().__init__()
+        self.loss_fn = nn.MSELoss(reduction=reduction)
+
+    def __call__(self, pred, ref):
+        if pred.is_complex():
+            loss = (
+                self.loss_fn(pred.real.flatten(start_dim=1), ref.real.flatten(start_dim=1))
+                + self.loss_fn(pred.imag.flatten(start_dim=1), ref.imag.flatten(start_dim=1))
+            )
+        else:
+            loss = self.loss_fn(pred.flatten(start_dim=1), ref.flatten(start_dim=1))
+
+        return loss

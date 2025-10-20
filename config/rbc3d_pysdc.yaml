@@ -16,15 +16,16 @@ sample:
   inStep: 1      # slice interval
 
 data:
+  dataClass: rbc
   outType: solution
   outScaling: 1
   space_dim: 3
   xStep: 1
   yStep: 1
   zStep: 1
-  dataFile: rbc3d_1e5_pysdc/RBC3DG4Ra1e5-res32_solution.h5
+  dataFile: RBC3DG4Ra1e5-res32_solution.h5
   trainRatio: 0.8
-  batchSize: 20
+  batchSize: 20        # Global Batch size
   sampling_mode: None  # Domain Sampling: [fixed, ordered, random]
   pad_to_fullGrid: false
   use_fixedPatch_startIdx: false
@@ -47,7 +48,6 @@ model:
   bias: false
   non_linearity: gelu
   scaling_layers: 4
-  use_prechannel_mlp: true
   use_postfnochannel_mlp: false
   channel_mlp_expansion: 4
   use_skip_connection: false
@@ -78,14 +78,14 @@ loss:
   absolute: false
   
 parallel_strategy:
-  ddp: true    # Distributed Data Parallel
+  ddp: false                       # Distributed Data Parallel
   gpus_per_node: 4
 
 train:
-  trainDir: trainDir
-  epochs: 1000
+  trainDir: RBC3D
+  epochs: 5                     # nEpochs
   checkpoint: None
-  saveInterval: 100
+  saveInterval: 5
   disableTensorboard: false
 
 eval:
@@ -96,4 +96,11 @@ eval:
   tSteps: 1
   model_dt: 0.5
   subtitle: "(64,64,32)"
+
+profile:
+  enableProfiler: false
+  profiler: nsys
+  profileDir: nsysProf
+  evalOnly: false
+  input_shape: [1,5,256,256,64]   # relevant only if eval_only=true
  
