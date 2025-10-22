@@ -2,6 +2,7 @@ import os
 import time
 from pathlib import Path
 from collections import OrderedDict
+from statistics import mean
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -218,15 +219,19 @@ class FourierNeuralOperator:
         optimizer = self.optimizer
         scheduler = self.lr_scheduler
 
+        if self.benchmark:
+            fwd_peak_mem = []
+            bwd_peak_mem = []
+            fwd_reserv_mem = []
+            bwd_reserv_mem = []
+
         # Epoch
         if self.enable_profile:
             if self.profiler_type == "torch":
                 self.profiler.start()
             nvtx.range_push(f"TrainEpoch_{self.epochs}")
 
-        # nSamples = len(self.trainLoader.dataset)
         nBatches = len(self.trainLoader)
-        # batchSize = self.trainLoader.batch_size
         data_iter = iter(self.trainLoader)
         total_loss = 0.0
         gradsEpoch = 0.0
@@ -239,7 +244,6 @@ class FourierNeuralOperator:
             # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, channel, nX, ny]
             inp_list, out_list = next(data_iter)
             nBatches = len(inp_list)
-            # batchSize = len(inp_list[0])
 
         for iBatch in range(nBatches):
             # Batch
@@ -268,8 +272,15 @@ class FourierNeuralOperator:
             
             optimizer.zero_grad()
             if self.debug:
-                print_rank0(f"[DEBUG] batch loss: {loss.item():.6e}, pred min/max: {pred.min().item():.6e}/{pred.max().item():.6e}, ref min/max: {ref.min().item():.6e}/{ref.max().item():.6e}")
+                print_rank0(f"[DEBUG] batch loss: {loss.item():.6e}, pred min/max: {pred.min().item():.6e}/{pred.max().item():.6e}, \
+                             ref min/max: {ref.min().item():.6e}/{ref.max().item():.6e}")
             
+            if self.benchmark and iBatch % 10 == 0:
+                allocated = torch.cuda.memory_allocated() / (1024 ** 2)  # MB
+                reserved = torch.cuda.memory_reserved() / (1024 ** 2)    # MB
+                fwd_peak_mem.append(allocated)
+                fwd_reserv_mem.append(reserved)
+
             # Backward 
             if self.enable_profile:
                 nvtx.range_push("backward")
@@ -299,6 +310,12 @@ class FourierNeuralOperator:
             optimizer.step()
             if self.enable_profile:
                 nvtx.range_pop() # end optimizer
+
+            if self.benchmark and iBatch % 10 == 0:
+                allocated = torch.cuda.memory_allocated() / (1024 ** 2)  # MB
+                reserved = torch.cuda.memory_reserved() / (1024 ** 2)    # MB
+                bwd_peak_mem.append(allocated)
+                bwd_reserv_mem.append(reserved)
 
             # if self.enable_profile:
             #     if self.profiler_type == "torch":
@@ -354,6 +371,13 @@ class FourierNeuralOperator:
         self.losses["model"]["train"] = train_loss
         self.gradientNormEpoch = gradsEpoch / nBatches
         print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.6f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
+        
+        if self.benchmark:
+            print_rank0(f"CUDA Memory for Fwd Pass - Allocated: {mean(fwd_peak_mem):.2f} MB")
+            print_rank0(f"CUDA Memory for Fwd Pass - Reserved: {mean(fwd_reserv_mem):.2f} MB")
+            print_rank0(f"CUDA Memory for Bwd Pass - Allocated: {mean(bwd_peak_mem):.2f} MB")
+            print_rank0(f"CUDA Memory for Fwd Pass - Reserved: {mean(bwd_reserv_mem):.2f} MB")
+            print_rank0(f"Estimate Activations Memory: {mean(fwd_peak_mem)-mean(bwd_peak_mem):.2f} MB")
 
         if self.enable_profile:
             if self.profiler_type == "torch":
@@ -470,7 +494,7 @@ class FourierNeuralOperator:
 
             t_epoch = time.perf_counter() - t0_epoch
 
-            if i > 2 and self.benchmark:
+            if self.benchmark and i > 1:
                 epoch_time.append(t_epoch)
                 compute_time.append(t_comp)
                 monitor_time.append(t_monit)
