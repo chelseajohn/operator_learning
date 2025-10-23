@@ -27,7 +27,7 @@ class FourierNeuralOperator:
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
                 loss:dict=None, profile:dict=None, checkpoint=None,
                 eval_only=False, debug=False, device=None, benchmark=False, 
-                data_class='pic'):
+                use_amp=True, data_class='pic'):
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -37,6 +37,10 @@ class FourierNeuralOperator:
         self.world_size = int(os.getenv('WORLD_SIZE', '1'))
         self.debug = debug
         self.benchmark = benchmark
+        self.use_amp = use_amp
+        
+        if use_amp:
+            self.scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
         
         if profile is not None:
             self.enable_profile = profile['enableProfiler']
@@ -249,26 +253,26 @@ class FourierNeuralOperator:
             # Batch
             # if self.enable_profile:
             #     nvtx.range_push(f"TrainBatch_{iBatch}")
-                
-            if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
-                data = (inp_list[iBatch], out_list[iBatch])
-            else:
-                data = next(data_iter)
-            inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
-            ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
+            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=self.use_amp):
+                if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
+                    data = (inp_list[iBatch], out_list[iBatch])
+                else:
+                    data = next(data_iter)
+                inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
+                ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
 
-            # Forward pass
-            if self.enable_profile:
-                nvtx.range_push("forward")
-            pred = model(inp)
-            if self.enable_profile:
-                nvtx.range_pop()   # end forward
+                # Forward pass
+                if self.enable_profile:
+                    nvtx.range_push("forward")
+                pred = model(inp)
+                if self.enable_profile:
+                    nvtx.range_pop()   # end forward
 
-            if self.enable_profile:
-                nvtx.range_push("loss")
-            loss = self.lossFunction(pred, ref)
-            if self.enable_profile:
-                nvtx.range_pop() # end loss
+                if self.enable_profile:
+                    nvtx.range_push("loss")
+                loss = self.lossFunction(pred, ref)
+                if self.enable_profile:
+                    nvtx.range_pop() # end loss
             
             optimizer.zero_grad()
             if self.debug:
@@ -284,7 +288,7 @@ class FourierNeuralOperator:
             # Backward 
             if self.enable_profile:
                 nvtx.range_push("backward")
-            loss.backward()
+            self.scaler.scale(loss).backward()
             if self.enable_profile:
                 nvtx.range_pop()  # end backward
             
@@ -307,7 +311,8 @@ class FourierNeuralOperator:
             # Optimizer
             if self.enable_profile:
                 nvtx.range_push("optimizer_step")
-            optimizer.step()
+            self.scaler.step(optimizer)
+            self.scaler.update()
             if self.enable_profile:
                 nvtx.range_pop() # end optimizer
 

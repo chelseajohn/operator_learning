@@ -8,7 +8,7 @@ sys.path.append(str(base_path))
 import argparse
 import torch
 from training.train_fno import FourierNeuralOperator
-from operator_learning.utils.misc import readConfig
+from operator_learning.utils.misc import readConfig, print_rank0
 
 # -----------------------------------------------------------------------------
 # Script parameters
@@ -31,6 +31,8 @@ parser.add_argument(
 parser.add_argument(
     "--benchmark", action="store_true", help="benchmark run")
 parser.add_argument(
+    "--use_amp", action="store_true", help="mixed precision training")
+parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
 args = parser.parse_args()
 
@@ -51,8 +53,14 @@ FourierNeuralOperator.TRAIN_DIR = args.trainDir
 FourierNeuralOperator.LOSSES_FILE = args.lossesFile
 FourierNeuralOperator.USE_TENSORBOARD = True if not args.disableTensorboard else False
 benchmark = True if args.benchmark else False
+use_amp = True if args.use_amp else False
 
-model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False, benchmark=benchmark)
+if benchmark:
+    print_rank0('Running FNO training for benchmarking...')
+if use_amp:
+    print_rank0('Using mixed precision for training...')
+
+model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False, benchmark=benchmark, use_amp=use_amp)
 model.learn(args.epochs, args.saveInterval)
 
 if torch.distributed.is_initialized():

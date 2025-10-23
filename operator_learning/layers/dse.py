@@ -3,7 +3,7 @@ if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
     from operator_learning.utils import flop_wrappers
 import torch
 import torch.nn as nn
-from operator_learning.utils.misc import format_complexTensor, deformat_complexTensor
+from operator_learning.utils.misc import format_complexTensor, deformat_complexTensor, einsum_complexhalf
 from .linear import GridLinear
 
 class SpectralConv_dse(nn.Module):
@@ -49,10 +49,13 @@ class SpectralConv_dse(nn.Module):
         - 2D: "bixy,ioxy->boxy"
         """
         R = deformat_complexTensor(weights).to(input.device)
+        use_complexhalf = (R.dtype == torch.complex32 and input.dtype == torch.complex32)
+        einsum_fn = einsum_complexhalf if use_complexhalf else torch.einsum
+
         if self.dim == 1:
-            return torch.einsum("bik,iok->bok", input, R)
+            return einsum_fn("bik,iok->bok", input, R)
         elif self.dim == 2:
-            return torch.einsum("bixy,ioxy->boxy", input, R)
+            return einsum_fn("bixy,ioxy->boxy", input, R)
         else:
             raise ValueError("dim must be 1 or 2")
 
