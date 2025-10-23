@@ -31,7 +31,7 @@ parser.add_argument(
 parser.add_argument(
     "--benchmark", action="store_true", help="benchmark run")
 parser.add_argument(
-    "--use_amp", action="store_true", help="mixed precision training")
+    "--use_amp", type=int, help="mixed precision training  [0:False, 1:True]")
 parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
 args = parser.parse_args()
@@ -53,7 +53,7 @@ FourierNeuralOperator.TRAIN_DIR = args.trainDir
 FourierNeuralOperator.LOSSES_FILE = args.lossesFile
 FourierNeuralOperator.USE_TENSORBOARD = True if not args.disableTensorboard else False
 benchmark = True if args.benchmark else False
-use_amp = True if args.use_amp else False
+use_amp = True if args.use_amp == 1 else False
 
 if benchmark:
     print_rank0('Running FNO training for benchmarking...')
