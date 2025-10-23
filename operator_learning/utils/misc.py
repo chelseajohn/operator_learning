@@ -102,4 +102,10 @@ def einsum_complexhalf(eq, *args):
         return torch.view_as_complex(tensors[input_output[1]])
 
 
-
+class NoScale:
+    def scale(self, loss):
+        return loss
+    def step(self, optimizer):
+        optimizer.step()
+    def update(self):
+        pass

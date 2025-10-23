@@ -14,7 +14,7 @@ from operator_learning.data import getDataLoaders
 from operator_learning.model import FNO
 from operator_learning.loss import LOSSES_CLASSES
 from operator_learning.utils.communication import Communicator
-from operator_learning.utils.misc import print_rank0
+from operator_learning.utils.misc import print_rank0, NoScale
 
 class FourierNeuralOperator:
     
@@ -41,6 +41,8 @@ class FourierNeuralOperator:
         
         if use_amp:
             self.scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+        else:
+            self.scaler = NoScale()
         
         if profile is not None:
             self.enable_profile = profile['enableProfiler']
