@@ -38,9 +38,13 @@ class FourierNeuralOperator:
         self.debug = debug
         self.benchmark = benchmark
         self.use_amp = use_amp
-        
+        if isinstance(self.device, torch.device):
+            self.autocast_device_type = self.device.type
+        else:
+            self.autocast_device_type = "cuda" if "cuda" in self.device else "cpu"
+       
         if use_amp:
-            self.scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+            self.scaler = torch.amp.GradScaler(self.autocast_device_type, enabled=use_amp)
         else:
             self.scaler = NoScale()
         
@@ -255,7 +259,7 @@ class FourierNeuralOperator:
             # Batch
             # if self.enable_profile:
             #     nvtx.range_push(f"TrainBatch_{iBatch}")
-            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=self.use_amp):
+            with torch.autocast(device_type=self.autocast_device_type, dtype=torch.float16, enabled=self.use_amp):
                 if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:

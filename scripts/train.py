@@ -58,9 +58,10 @@ use_amp = True if args.use_amp == 1 else False
 if benchmark:
     print_rank0('Running FNO training for benchmarking...')
 if use_amp:
-    print_rank0('Using mixed precision for training...')
+    print_rank0(f'Using mixed precision for training with float32 and float16...')
 
-model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False, benchmark=benchmark, use_amp=use_amp)
+model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False,\
+                            benchmark=benchmark, use_amp=use_amp)
 model.learn(args.epochs, args.saveInterval)
 
 if torch.distributed.is_initialized():
