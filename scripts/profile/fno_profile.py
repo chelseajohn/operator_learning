@@ -59,6 +59,10 @@ parser.add_argument(
     "--evalOnly", action="store_true", help="profile inference only")
 parser.add_argument(
      "--input_shape", type=int, nargs='+', help="Input tensor shape: e.g., --input_shape 16 1 64 64")
+parser.add_argument(
+    "--benchmark", action="store_true", help="benchmark run")
+parser.add_argument(
+    "--use_amp", type=int, help="mixed precision training  [0:False, 1:True]")
 args = parser.parse_args()
 config = readConfig(args.config)
 
@@ -119,7 +123,16 @@ else:
     FourierNeuralOperator.TRAIN_DIR = args.profileDir
     FourierNeuralOperator.LOSSES_FILE = 'loss.txt'
     FourierNeuralOperator.USE_TENSORBOARD = False
-    model = FourierNeuralOperator(**configs, device=device)
+    benchmark = True if args.benchmark else False
+    use_amp = True if args.use_amp == 1 else False
+
+    if benchmark:
+        print_rank0('Running FNO training for benchmarking...')
+    if use_amp:
+        print_rank0(f'Using mixed precision for training with float32 and float16...')
+
+    model = FourierNeuralOperator(**configs,debug=False, device=device, \
+                                  benchmark=benchmark, use_amp=use_amp)
     model.learn(nEpoch=3, save_interval=5)
 
     if torch.distributed.is_initialized():

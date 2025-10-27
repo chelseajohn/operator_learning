@@ -89,3 +89,5 @@ profile:
   profileDir: nsysProf
   evalOnly: false
   input_shape: [1,2,10000]   # relevant only if eval_only=true
+  use_amp: 1
+  benchmark: true
