@@ -76,11 +76,11 @@ if args.evalOnly:
     print_rank0(f'Profiling Only Model Inference with torch profiler')
     assert 'model' in config, f"config file needs a model section"
     # FNO model
-    model = FNO(**config['model']).to(device)
+    model = FNO(**config['model'], device=device).to(device)
     input = torch.rand(*args.input_shape).to(device)
     activities = [ProfilerActivity.CUDA] # ProfilerActivity.CPU
     sort_by_keyword = str(device)+ "_time_total"
-    fno_schedule = schedule(skip_first=0, wait=1, warmup=1, active=3, repeat=1)
+    fno_schedule = schedule(skip_first=0, wait=0, warmup=1, active=3, repeat=1)
 
     with profile(
         activities=activities, 
@@ -93,8 +93,17 @@ if args.evalOnly:
         on_trace_ready=torch.profiler.tensorboard_trace_handler(f'{args.profileDir}'),
     ) as prof:
             for i in range(10):
-                with torch.no_grad():   
+                with torch.no_grad(): 
+                    torch.cuda.reset_peak_memory_stats()
+                    torch.cuda.synchronize()
+                    start = torch.cuda.memory_allocated()  
                     model(input)
+                    torch.cuda.synchronize()
+                    after_fwd = torch.cuda.memory_allocated()
+                    peak = torch.cuda.max_memory_allocated()
+
+                    print(f"Forward alloc: {(after_fwd - start)/1e6:.2f} MB")
+                    print(f"Peak alloc: {peak/1e6:.2f} MB")
                 prof.step()             
 
     print_rank0('*' * 120)
@@ -111,7 +120,7 @@ else:
     FourierNeuralOperator.LOSSES_FILE = 'loss.txt'
     FourierNeuralOperator.USE_TENSORBOARD = False
     model = FourierNeuralOperator(**configs, device=device)
-    model.learn(nEpoch=5, save_interval=5)
+    model.learn(nEpoch=3, save_interval=5)
 
     if torch.distributed.is_initialized():
         torch.distributed.destroy_process_group()

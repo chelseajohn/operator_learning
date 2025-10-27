@@ -58,7 +58,7 @@ class FourierNeuralOperator:
                     activities.append(tprof.ProfilerActivity.CUDA)
                 self.profiler = tprof.profile(
                     activities=activities,
-                    schedule=tprof.schedule(skip_first=0, wait=1, warmup=1, active=3, repeat=1),
+                    schedule=tprof.schedule(skip_first=0, wait=0, warmup=1, active=2, repeat=1),
                     on_trace_ready=tprof.tensorboard_trace_handler(self.profiler_dir),
                     record_shapes=True,
                     profile_memory=True,
@@ -328,9 +328,9 @@ class FourierNeuralOperator:
                 bwd_peak_mem.append(allocated)
                 bwd_reserv_mem.append(reserved)
 
-            # if self.enable_profile:
-            #     if self.profiler_type == "torch":
-            #         self.profiler.step()
+            if self.enable_profile:
+                if self.profiler_type == "torch":
+                    self.profiler.step()
             #     nvtx.range_pop() # end batch
 
             if self.debug:
