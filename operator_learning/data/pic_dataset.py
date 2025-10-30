@@ -16,14 +16,10 @@ class PICDataset(Dataset):
             
         """
         
-        self.file = h5py.File(dataFile, 'r')
+        self.dataFile = dataFile  
+        self._file = None 
         self.dataClass = kwargs.get('dataClass', 'pic')
-        self.inputs = self.file['inputs']
-        self.outputs = self.file['outputs']
-        self.nDim = self.infos['nDim'][()]
-        self.outType = self._decode(self.infos['outType'][()])
-        self.outScaling = self.infos['outScaling'][()]
-       
+
         if self.nDim == 2:
             self.kY = kwargs.get('kY', 12)
         else:
@@ -31,11 +27,41 @@ class PICDataset(Dataset):
             self.kZ = kwargs.get('kZ', 12)
 
         self.kX = kwargs.get('kX', 12)
-        
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state['_file'] = None  # remove the h5py file before pickling
+        return state   
+    
+    @property
+    def file(self):
+        if self._file is None:
+            self._file = h5py.File(self.dataFile, 'r')
+        return self._file
+    
+    @property
+    def inputs(self):
+        return self.file['inputs']
+
+    @property
+    def outputs(self):
+        return self.file['outputs']
+
+    @property
+    def nDim(self):
+        return int(self.infos['nDim'][()])
+
+    @property
+    def outType(self):
+        return self._decode(self.infos['outType'][()])
+
+    @property
+    def outScaling(self):
+        return float(self.infos['outScaling'][()])
+     
+    def __len__(self):
         assert len(self.inputs) == len(self.outputs), \
             f"different sample number for inputs and outputs ({len(self.inputs)},{len(self.outputs)})"
-        
-    def __len__(self):
         return len(self.inputs)
 
     def __getitem__(self, idx):
@@ -44,8 +70,9 @@ class PICDataset(Dataset):
 
     def __del__(self):
         try:
-            self.file.close()
-        except:
+            if self._file is not None:
+                self._file.close()
+        except Exception:
             pass
 
     def sample(self, idx):

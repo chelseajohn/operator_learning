@@ -3,7 +3,7 @@ if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
     from operator_learning.utils import flop_wrappers
 import torch
 import torch.nn as nn
-from operator_learning.utils.misc import format_complexTensor, deformat_complexTensor
+from operator_learning.utils.misc import format_complexTensor, deformat_complexTensor, einsum_complexhalf
 
 class SpectralConv(nn.Module):
     """
@@ -60,19 +60,19 @@ class SpectralConv(nn.Module):
 
     def T(self, kMax, n, device, sym=False):
         T = torch.cat([
-            torch.eye(kMax, dtype=torch.cfloat),        # Top-left identity
-            torch.zeros(kMax, n - kMax, dtype=torch.cfloat)                 # Zero-pad to match n columns
-        ], dim=1)                                       # Shape: [kMax, n]
+            torch.eye(kMax, dtype=torch.cfloat, device=device),                  # Top-left identity
+            torch.zeros(kMax, n - kMax, dtype=torch.cfloat, device=device)       # Zero-pad to match n columns
+        ], dim=1)                                                 # Shape: [kMax, n]
 
         if sym:
             Tinv = torch.cat([
-                torch.zeros(kMax, n - kMax, dtype=torch.cfloat),            # Zero-pad on the left
-                torch.eye(kMax, dtype=torch.cfloat)     # Bottom-right identity
-            ], dim=1)                                   # Shape: [kMax, n]
+                torch.zeros(kMax, n - kMax, dtype=torch.cfloat, device=device),   # Zero-pad on the left
+                torch.eye(kMax, dtype=torch.cfloat,device=device)                # Bottom-right identity
+            ], dim=1)                                              # Shape: [kMax, n]
             
-            T = torch.cat([T, Tinv], dim=0)             # Final shape: [2*kMax, n]
+            T = torch.cat([T, Tinv], dim=0)                        # Final shape: [2*kMax, n]
 
-        return T.to(device)
+        return T
 
     def _toFourierSpace(self, x):
         """ 
@@ -83,7 +83,7 @@ class SpectralConv(nn.Module):
         if self.dim == 1:
             x = torch.fft.rfft(x, dim=-1, norm="ortho")
         elif self.dim == 2:
-            x = torch.fft.rfftn(x, dim=(-2,-1), norm="ortho")   # RFFT on last 2 dimensions
+            x = torch.fft.rfftn(x, dim=(-2,-1), norm="ortho")      # RFFT on last 2 dimensions
         else:
             x = torch.fft.rfftn(x, dim=(-3,-2,-1), norm="ortho")   # RFFT on last 3 dimensions
         return x
@@ -97,7 +97,7 @@ class SpectralConv(nn.Module):
         if self.dim == 1:
             x = torch.fft.irfft(x, n=org_size[-1], dim=-1, norm="ortho")
         elif self.dim == 2:
-            x = torch.fft.irfftn(x, s=org_size, dim=(-2,-1), norm="ortho")  # IRFFT on last 2 dimensions
+            x = torch.fft.irfftn(x, s=org_size, dim=(-2,-1), norm="ortho")     # IRFFT on last 2 dimensions
         else:
             x = torch.fft.irfftn(x, s=org_size, dim=(-3,-2,-1), norm="ortho")  # IRFFT on last 3 dimensions
         return x
@@ -110,46 +110,46 @@ class SpectralConv(nn.Module):
         x = self._toFourierSpace(x)
         f_dims = x.shape[-self.dim:]
 
-      
+        R = deformat_complexTensor(self.R).to(x.device)     
+        use_complexhalf = (R.dtype == torch.complex32 or x.dtype == torch.complex32)
+        einsum_fn = einsum_complexhalf if use_complexhalf else torch.einsum
+
         if self.dim == 1:
             Tx = self.T(self.kX, f_dims[0], x.device, sym=False)
             # -- Tx[kX, fX]
-            x = torch.einsum("ax,eix->eia", Tx, x)   
+            x = einsum_fn("ax,eix->eia", Tx, x)   
 
             # Apply R[dv, dv, kX] -> [nBatch, dv, kX]
-            R = deformat_complexTensor(self.R).to(x.device)       
-            x = torch.einsum("ija,eja->eia", R, x)   
+            x = einsum_fn("ija,eja->eia", R, x)   
             
             # Padding on high frequency modes -> [nBatch, dv, fX]
-            x = torch.einsum("xa,eia->eix", Tx.T, x)      
+            x = einsum_fn("xa,eia->eix", Tx.T, x)      
 
         elif self.dim == 2:
             Tx = self.T(self.kX, f_dims[0], x.device, sym=True)
             Ty = self.T(self.kY, f_dims[1], x.device)
             # Truncate and keep only first modes -> [nBatch, dv, kX, kY,..]
             # -- Tx[kX, fX], Ty[kY, fY]
-            x = torch.einsum("ax,by,eixy->eiab", Tx, Ty, x)
+            x = einsum_fn("ax,by,eixy->eiab", Tx, Ty, x)
 
             # Apply R[dv, dv, kX, kY] -> [nBatch, dv, kX, kY]
-            R = deformat_complexTensor(self.R).to(x.device)
-            x = torch.einsum("ijab,ejab->eiab", R, x)
+            x = einsum_fn("ijab,ejab->eiab", R, x)
 
             # Padding on high frequency modes -> [nBatch, dv, fX, fY]
-            x = torch.einsum("xa,yb,eiab->eixy", Tx.T, Ty.T, x)
+            x = einsum_fn("xa,yb,eiab->eixy", Tx.T, Ty.T, x)
 
         else:
             Tx = self.T(self.kX, f_dims[0], x.device, sym=True)
             Ty = self.T(self.kY, f_dims[1], x.device, sym=True)
             Tz = self.T(self.kZ, f_dims[2], x.device)
             # -- Tx[kX, fX], Ty[kY, fY], Tz[kZ, fZ]
-            x = torch.einsum("ax,by,cz,ejxyz->ejabc", Tx, Ty, Tz, x)
+            x = einsum_fn("ax,by,cz,ejxyz->ejabc", Tx, Ty, Tz, x)
 
             #  Apply R[dv, dv, kX, kY, kZ] -> [nBatch, dv, kX, kY, kZ]
-            R = deformat_complexTensor(self.R).to(x.device)
-            x = torch.einsum("ijabc,ejabc->eiabc", R, x)
+            x = einsum_fn("ijabc,ejabc->eiabc", R, x)
 
            # Padding on high frequency modes -> [nBatch, dv, fX, fY, fZ]
-            x = torch.einsum("xa,yb,zc,eiabc->eixyz", Tx.T, Ty.T, Tz.T, x)
+            x = einsum_fn("xa,yb,zc,eiabc->eixyz", Tx.T, Ty.T, Tz.T, x)
 
 
         # Transform back to Real space -> [nBatch, dv, nX, nY, ..]

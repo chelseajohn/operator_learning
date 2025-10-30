@@ -1,12 +1,15 @@
-from operator_learning.utils import flop_wrappers
+import os
+if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
+    from operator_learning.utils import flop_wrappers
 import torch 
 import torch.nn as nn
 import pandas as pd
-import torch.nn.functional as F
+import torch.nn.functional
 from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
+torch.set_float32_matmul_precision('high')
 
 class FNOLayer(nn.Module):
 

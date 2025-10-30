@@ -13,7 +13,6 @@ mpi4py==4.0.1
 mpmath==1.3.0
 numpy==1.26.4
 pandas==2.2.2
-Pillow-SIMD==10.4.0
 py-cpuinfo-9.0.0
 pytest-benchmark-5.1.0
 pyvista==0.46.2
@@ -28,3 +27,4 @@ torch_flops==0.3.6
 torchprofile==0.0.4
 tqdm==4.66.5
 transformers==4.56.1
+triton==3.1.0

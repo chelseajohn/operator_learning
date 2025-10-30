@@ -90,6 +90,10 @@ profile:
   profiler: nsys
   profileDir: nsysProf
   evalOnly: false
-  input_shape: [1,3,10000]   # relevant only if eval_only=true
-
+  input_shape: [1,3,10000]   # relevant only if evalOnly=true or compile_eval=true
+  use_amp: 0
+  benchmark: true
+  compile_eval: 0       
+  compile_train: 0
+  comipile_mode: default    # compiler mode 
  
