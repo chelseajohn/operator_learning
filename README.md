@@ -10,11 +10,10 @@ This repository contains implementations, experimental scripts, and documentatio
 
 ### ✅ Base Environment
 
-- Python: 3.12.3  
-- OpenMPI: 5.0.5  
-- CUDA: 12.6  
-- PyTorch: 2.5.1+cu124  
-- FFTW: 3.3.10  
+- Python 
+- OpenMPI
+- CUDA 
+- PyTorch  
 - Python dependencies listed in [requirements.txt](requirements.txt)
 
 ### 🔧 Setup Instructions
@@ -76,6 +75,11 @@ profile:
   profileDir: profileLog
   evalOnly: false             # profile only inference using torch profiler 
   input_shape: [1,3,10000]    # relevant only if eval_only=true
+  use_amp: 1                  # enable mixed precision
+  benchmark: true             # run profiling in benchmark mode
+  compile_eval: 1             # use torch.compile on model inference
+  compile_train: 0            # use torch.compile on training (set to 1, if compile_eval=0)
+  comipile_mode: default      # compiler mode 
 ```
 
 ## Problems Solved
