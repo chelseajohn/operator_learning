@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 from collections import OrderedDict
 from statistics import mean
-import numpy as np
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -14,7 +13,8 @@ from operator_learning.data import getDataLoaders
 from operator_learning.model import FNO
 from operator_learning.loss import LOSSES_CLASSES
 from operator_learning.utils.communication import Communicator
-from operator_learning.utils.misc import print_rank0, NoScale
+from operator_learning.utils.misc import print_rank0, NoScale, compile_timing, optimizer_step, scheduler_step
+torch.set_float32_matmul_precision('high')
 
 class FourierNeuralOperator:
     
@@ -27,7 +27,7 @@ class FourierNeuralOperator:
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
                 loss:dict=None, profile:dict=None, checkpoint=None,
                 eval_only=False, debug=False, device=None, benchmark=False, 
-                use_amp=True, data_class='pic'):
+                use_amp=False, compile=False, compile_mode='default', data_class='pic'):
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -38,6 +38,9 @@ class FourierNeuralOperator:
         self.debug = debug
         self.benchmark = benchmark
         self.use_amp = use_amp
+        self.compile = compile
+        self.compile_mode = compile_mode
+
         if isinstance(self.device, torch.device):
             self.autocast_device_type = self.device.type
         else:
@@ -74,8 +77,8 @@ class FourierNeuralOperator:
 
 
         if parallel_strategy is not None:
-            gpus_per_node = parallel_strategy.pop("gpus_per_node", 4)
-            self.DDP_enabled = parallel_strategy.pop("ddp", False)
+            gpus_per_node = parallel_strategy["gpus_per_node"] if "gpus_per_node" in parallel_strategy else 4
+            self.DDP_enabled = parallel_strategy["ddp"] if "ddp" in parallel_strategy else False
             if self.DDP_enabled: 
                 self.communicator = Communicator(gpus_per_node, self.rank)
                 self.world_size = self.communicator.world_size
@@ -99,16 +102,16 @@ class FourierNeuralOperator:
         # Data loading
         assert "dataFile" in data, "Missing dataFile in data config"
         self.data_config = data.copy()
-        self.xStep = data.pop("xStep", 1)
-        self.yStep = data.pop("yStep", 1)
-        self.zStep = data.pop("zStep", 1)
-        data.pop("outType", 'solution')
-        data.pop("outScaling", 1.0)
+        self.xStep = self.data_config.pop("xStep", 1)
+        self.yStep = self.data_config.pop("yStep", 1)
+        self.zStep = self.data_config.pop("zStep", 1)
+        self.data_config.pop("outType", 'solution')
+        self.data_config.pop("outScaling", 1.0)
         self.use_domain_sampling = True if self.data_config['sampling_mode'] is not None else False  # only for 2D
         self.dataClass = data['dataClass'] 
 
         # sample RBC: [batchSize, channel, nX, nY, (nZ)], sample PIC: [batchSize, channel, dim]
-        self.trainLoader, self.valLoader, self.dataset = getDataLoaders(**data, kX=model['kX'], kY=model['kY'], kZ=model['kZ'])
+        self.trainLoader, self.valLoader, self.dataset = getDataLoaders(**self.data_config, kX=model['kX'], kY=model['kY'], kZ=model['kZ'])
         self.outType = self.dataset.outType
         self.outScaling = self.dataset.outScaling
 
@@ -119,14 +122,14 @@ class FourierNeuralOperator:
                 "absolute": False,
             }
         assert "name" in loss, "Loss config must have a 'name'"
-        loss_class = LOSSES_CLASSES.get(loss.pop("name"))
+        self.loss_config = loss.copy()
+        loss_class = LOSSES_CLASSES.get(self.loss_config.pop("name"))
         if loss_class is None:
             raise NotImplementedError(f"Unknown loss type, available are {list(LOSSES_CLASSES.keys())}")
 
         # if "grids" in loss:
         #     loss["grids"] = self.dataset.grid
-        self.lossFunction = loss_class(**loss, device=self.device)
-        self.lossConfig = loss
+        self.lossFunction = loss_class(**self.loss_config, device=self.device)
 
         # Loss tracking
         if self.dataClass == 'rbc':
@@ -167,8 +170,8 @@ class FourierNeuralOperator:
         torch.cuda.empty_cache()
 
     def setupOptimizer(self, optim_config=None):
-        optim_config = optim_config or {"name": "adam", "lr": 1e-4, "weight_decay": 1e-5}
-        name = optim_config.pop("name")
+        self.optim_config = optim_config.copy() or {"name": "adam", "lr": 1e-4, "weight_decay": 1e-5}
+        name = self.optim_config.pop("name")
         optim_class = {
             "adam": torch.optim.Adam,
             "adamW": torch.optim.AdamW,
@@ -177,20 +180,20 @@ class FourierNeuralOperator:
         if optim_class is None:
             raise ValueError(f"Unknown optimizer: {name}")
 
-        self.optimizer = optim_class(self.model.parameters(), **optim_config)
+        self.optimizer = optim_class(self.model.parameters(), **self.optim_config)
         self.optimConfig = optim_config
         self.optim = name
 
     def setupLRScheduler(self,lr_scheduler=None):
         if lr_scheduler is None:
             lr_scheduler = {"scheduler": "StepLR", "step_size": 100.0, "gamma": 0.98}
-        self.scheduler_config = lr_scheduler
-        scheduler = lr_scheduler.pop('scheduler')
+        self.scheduler_config = lr_scheduler.copy()
+        scheduler = self.scheduler_config.pop('scheduler')
         self.scheduler_name = scheduler
         if scheduler == "StepLR":
-            self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, **lr_scheduler)
+            self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, **self.scheduler_config)
         elif scheduler == "CosAnnealingLR":
-            self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, **lr_scheduler)
+            self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, **self.scheduler_config)
         else:
             raise ValueError(f"LR scheduler {scheduler} not implemented yet")
 
@@ -317,8 +320,7 @@ class FourierNeuralOperator:
             # Optimizer
             if self.enable_profile:
                 nvtx.range_push("optimizer_step")
-            self.scaler.step(optimizer)
-            self.scaler.update()
+            optimizer_step(self.scaler, optimizer)
             if self.enable_profile:
                 nvtx.range_pop() # end optimizer
 
@@ -364,7 +366,7 @@ class FourierNeuralOperator:
         if self.USE_TENSORBOARD:
             self.writer.add_scalar("LearningRate", optimizer.param_groups[0]['lr'], self.epochs)
 
-        scheduler.step()
+        scheduler_step(scheduler)
         avg_loss = total_loss / nBatches
 
         if self.DDP_enabled:
@@ -466,8 +468,22 @@ class FourierNeuralOperator:
         if self.benchmark:
             epoch_time = []
             compute_time = []
+            train_time = []
             monitor_time = []
             checkpoint_time = []
+            compile_times = []
+            mode_name = "Compiled" if self.compile else "Eager"
+
+        # torch.compile
+        if self.compile:
+            print_rank0(f"Compiling training function with mode={self.compile_mode}...")
+            try:
+                train_fn = torch.compile(self.train, mode=self.compile_mode)
+            except Exception as e:
+                print_rank0(f"[WARN] torch.compile failed, falling back to eager mode: {e}")
+                train_fn = self.train
+        else:
+            train_fn = self.train
 
         for i in range(start_epoch, end_epoch):
             print_rank0(f"\nEpoch {i}")
@@ -478,14 +494,20 @@ class FourierNeuralOperator:
                 torch.cuda.cudart().cudaProfilerStart()
 
             t0_comp = time.perf_counter()
-            self.train()
+            if self.benchmark:
+                _, compile_time = compile_timing(lambda: train_fn())
+                compile_times.append(compile_time)
+                print_rank0(f"{mode_name} train time (epoch {i}): {compile_time:.4f}s")
+            else:
+                train_fn()
+            t_train = time.perf_counter() - t0_comp
             self.valid()
-            t_comp = time.perf_counter()- t0_comp
+            t_comp = time.perf_counter() - t0_comp
             self.tCompEpoch = t_comp
 
             t0_monit = time.perf_counter()
             self.monitor()
-            t_monit = time.perf_counter()- t0_monit
+            t_monit = time.perf_counter() - t0_monit
 
             if i % save_interval == 0 or i == end_epoch-1 :
                 if self.enable_profile:
@@ -508,6 +530,7 @@ class FourierNeuralOperator:
             if self.benchmark and i > 1:
                 epoch_time.append(t_epoch)
                 compute_time.append(t_comp)
+                train_time.append(t_train)
                 monitor_time.append(t_monit)
 
             self.epochs += 1
@@ -519,30 +542,41 @@ class FourierNeuralOperator:
         if self.benchmark and len(epoch_time) > 0:
             num_epochs = len(epoch_time)
             total_epoch_time = sum(epoch_time) 
+            total_train_time = sum(train_time)
             total_compute_time = sum(compute_time)
             total_monitor_time = sum(monitor_time) 
             total_checkpoint_time = sum(checkpoint_time)
             total_samples = num_epochs * (len(self.trainLoader.dataset) + len(self.valLoader.dataset))
+            total_train_samples = num_epochs * len(self.trainLoader.dataset)
+            samples_per_sec_train = int(total_train_samples/total_train_time)
             samples_per_sec = int(total_samples/total_compute_time)
+            compile_time_mean = mean(compile_times[1:]) # not including first epoch
 
             data = {
-                "Metric": ["NumEpochs", "TotalEpochTime (s)", "TotalMonitorTime (s)",
-                            "TotalCheckpointTime (s)", "TotalComputeTime (s)",
-                            "TotalTimesteps", "Timesteps/s"],
+                "Metric": ["NumEpochs", "TotalEpochTime (s)",
+                            "TotalMonitorTime (s)", "TotalCheckpointTime (s)",
+                            "TotalComputeTime (s)","TotalTrainTime (s)",
+                            "MeanCompileTime (s)", "TotalTrainTimesteps",
+                            "TotalTimesteps", "TrainTimesteps/s", 
+                            "Timesteps/s"],
                 "Value": [  round(num_epochs,0),
                             round(total_epoch_time, 3),
                             round(total_monitor_time, 3),
                             round(total_checkpoint_time, 3),
                             round(total_compute_time, 3),
-                            round(total_samples,0),
-                            round(samples_per_sec,0)],
+                            round(total_train_time, 3),
+                            round(compile_time_mean, 3),
+                            round(total_train_samples, 0),
+                            round(total_samples, 0),
+                            round(samples_per_sec_train, 0),
+                            round(samples_per_sec, 0)],
                 }
 
             print_rank0("\n=== Benchmark Summary ===")
             for metric, value in zip(data["Metric"], data["Value"]):
                 print_rank0(f"{metric}: {value}")
             print_rank0("==========================\n")
-
+      
     def monitor(self):
         if self.USE_TENSORBOARD and self.rank == 0:
             self.writer.add_scalars("Losses", {

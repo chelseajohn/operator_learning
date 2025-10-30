@@ -17,36 +17,45 @@ class RBCDataset(Dataset):
             dataFile (hdf5): data file 
             
         """
-        
-        
-        self.file = h5py.File(dataFile, 'r')
-        self.inputs = self.file['inputs']
-        self.outputs = self.file['outputs']
+        self.dataFile = dataFile  
+        self._file = None 
         self.dataClass = kwargs.get('dataClass', 'rbc')
         self.nDim = kwargs.get('space_dim', 2)
 
-        if self.nDim == 1:
-            xGrid = self.grid
-        elif self.nDim == 2:
-            xGrid, yGrid = self.grid
-            self.nY = yGrid.size
+        if self.nDim == 2:
             self.kY = kwargs.get('kY', 12)
-        else:
-            xGrid, yGrid, zGrid = self.grid
-            self.nY = yGrid.size
+        elif self.nDim == 3:
             self.kY = kwargs.get('kY', 12)
-            self.nZ = zGrid.size
             self.kZ = kwargs.get('kZ', 12)
 
-        self.nX = xGrid.size
         self.kX = kwargs.get('kX', 12)
-        
-  
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state['_file'] = None  # remove the h5py file before pickling
+        return state
+    
+    @property
+    def file(self):
+        if self._file is None:
+            self._file = h5py.File(self.dataFile, 'r')
+        return self._file
+    
+    @property
+    def inputs(self):
+        return self.file['inputs']
+
+    @property
+    def outputs(self):
+        return self.file['outputs']
+
+    def __len__(self):
         assert len(self.inputs) == len(self.outputs), \
             f"different sample number for inputs and outputs ({len(self.inputs)},{len(self.outputs)})"
-        
-    def __len__(self):
         return len(self.inputs)
+
+    def sample(self, idx):
+        return self.inputs[idx], self.outputs[idx]
 
     def __getitem__(self, idx):
         inpt, outp = self.sample(idx)
@@ -54,26 +63,41 @@ class RBCDataset(Dataset):
 
     def __del__(self):
         try:
-            self.file.close()
-        except:
+            if self._file is not None:
+                self._file.close()
+        except Exception:
             pass
-
-    def sample(self, idx):
-        return self.inputs[idx], self.outputs[idx]
 
     @property
     def infos(self):
-        return self.file["infos"]
-
+       return self.file['infos']
+        
     @property
     def grid(self):
-        if self.nDim  == 1:
-            return self.infos["xGrid"][:],
+        infos = self.infos
+        if self.nDim == 1:
+            return (infos['xGrid'][:],)
         elif self.nDim == 2:
-            return self.infos["xGrid"][:], self.infos["yGrid"][:]
+            return (infos['xGrid'][:], infos['yGrid'][:])
         else:
-            return self.infos["xGrid"][:], self.infos["yGrid"][:], self.infos["zGrid"][:]
+            return (infos['xGrid'][:], infos['yGrid'][:], infos['zGrid'][:])
+    
+    @property
+    def nX(self):
+        return self.grid[0].size
+   
+    @property
+    def nY(self):
+        if self.nDim < 2:
+            return None
+        return self.grid[1].size
 
+    @property
+    def nZ(self):
+        if self.nDim < 3:
+            return None
+        return self.grid[2].size
+        
     @property
     def outType(self):
         return self.infos["outType"][()].decode("utf-8")

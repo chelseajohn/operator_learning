@@ -60,19 +60,19 @@ class SpectralConv(nn.Module):
 
     def T(self, kMax, n, device, sym=False):
         T = torch.cat([
-            torch.eye(kMax, dtype=torch.cfloat),                  # Top-left identity
-            torch.zeros(kMax, n - kMax, dtype=torch.cfloat)       # Zero-pad to match n columns
+            torch.eye(kMax, dtype=torch.cfloat, device=device),                  # Top-left identity
+            torch.zeros(kMax, n - kMax, dtype=torch.cfloat, device=device)       # Zero-pad to match n columns
         ], dim=1)                                                 # Shape: [kMax, n]
 
         if sym:
             Tinv = torch.cat([
-                torch.zeros(kMax, n - kMax, dtype=torch.cfloat),   # Zero-pad on the left
-                torch.eye(kMax, dtype=torch.cfloat)                # Bottom-right identity
+                torch.zeros(kMax, n - kMax, dtype=torch.cfloat, device=device),   # Zero-pad on the left
+                torch.eye(kMax, dtype=torch.cfloat,device=device)                # Bottom-right identity
             ], dim=1)                                              # Shape: [kMax, n]
             
             T = torch.cat([T, Tinv], dim=0)                        # Final shape: [2*kMax, n]
 
-        return T.to(device)
+        return T
 
     def _toFourierSpace(self, x):
         """ 
@@ -111,7 +111,7 @@ class SpectralConv(nn.Module):
         f_dims = x.shape[-self.dim:]
 
         R = deformat_complexTensor(self.R).to(x.device)     
-        use_complexhalf = (R.dtype == torch.complex64 or x.dtype == torch.complex64)
+        use_complexhalf = (R.dtype == torch.complex32 or x.dtype == torch.complex32)
         einsum_fn = einsum_complexhalf if use_complexhalf else torch.einsum
 
         if self.dim == 1:

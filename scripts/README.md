@@ -2,7 +2,7 @@
 
 The scripts facilitate training FNO models and comprehensive evaluation of trained models with visualization and analysis capabilities.
 
-## Training
+# Training
 Main training script for 1D/2D/3D Fourier Neural Operator models.
 
 **Features:**
@@ -11,6 +11,8 @@ Main training script for 1D/2D/3D Fourier Neural Operator models.
 - Tensorboard logging integration
 - Checkpoint saving and resuming
 - Multiple optimizer and learning rate scheduler options
+- Benchmarking
+- Mixed precision and torch.compile
 
 **Usage:**
 ```bash
@@ -26,8 +28,11 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--disableTensorboard`: Disable Tensorboard logging
 - `--lossesFile`: File to write loss values
 - `--benchmark` : To get benchmark matrices
+- `--use_amp` : To use mixed precision training (Float32/Float16)
+- `--compile_train`: To compile `train()` with `torch.compile`
+- `--compile_mode` : `torch.compile` mode ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']
 
-## Rayleigh Benard Convection (RBC) Evaluation
+# Rayleigh Benard Convection (RBC) Evaluation
 Comprehensive evaluation script for trained FNO models with detailed analysis and visualization for Rayleigh Benard Convection
 
 **Features:**
@@ -65,7 +70,7 @@ The scripts work with HDF5 datasets containing:
 - `infos`: Metadata including grid information, timesteps, and dataset parameters
 - `xGrid`, `yGrid`: Spatial grid coordinates (if available)
 
-## Particle In Cell (PIC) Evaluation
+# Particle In Cell (PIC) Evaluation
 Comprehensive evaluation script for trained FNO models with visualization for PIC in 1D/2D
 
 **Usage:**
@@ -94,9 +99,9 @@ OR
 - `--config`: Configuration file for evaluation parameters (default: None)  
 
 
-## Profiling & FLOP Calculation
+# Benchmark
 
-### Profile
+## Profile
 
 The script allows you to profile training using either Nsight Systems or Torch profile. Additionally, Torch profiler can be used to profile only inference.
 
@@ -135,9 +140,25 @@ To launch Torch profiler do:
 
 `python fno_profile.py --config=config.yaml`
 
-### FLOP/MAC Caculation
+## FLOP/MAC Caculation
 
 The script can calculate FLOP/MAC used by the code using [torchprofile](https://github.com/zhijian-liu/torchprofile) or [calcflops](https://github.com/MrYxJ/calculate-flops.pytorch).
 
 To get FLOPS for custom operations set:
 `ENABLE_FLOP_WRAPPERS=1 python calc_flops.py --config=config.yaml`
+
+## Torch Compile
+
+The script benchmarks various compile mode strategies: ['eager', 'default', 'reduce-overhead', 'max-autotune','max-autotune-no-cudagraphs'] using `torch.compile` for training and inference.
+
+To run inference benchmark with all the compile mode strategies do:
+
+`python fno_compile.py --config=config.yaml --compile_eval --input_shape 5 4 256 64`
+
+To run training benchmark with compile mode do:
+
+`python fno_compile.py --config=config.yaml --compile_train --compile_mode=mode`
+
+where `mode` can be any of the strategies mentioned above.
+
+Additionally `--use_amp=1` can be used to train with mixed precision.

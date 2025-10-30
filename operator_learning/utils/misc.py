@@ -39,6 +39,7 @@ def deformat_complexTensor(weight):
         R  = weight
     return R
 
+@torch._dynamo.disable
 def print_rank0(message):
     """
     If distributed training is initiliazed, print only on rank 0
@@ -48,7 +49,8 @@ def print_rank0(message):
             print(message, flush=True)
     else:
         print(message, flush=True)
-
+        
+@torch._dynamo.disable
 def einsum_complexhalf(eq, *args):
     """
     Compute einsum for complex half tensors
@@ -101,11 +103,39 @@ def einsum_complexhalf(eq, *args):
 
         return torch.view_as_complex(tensors[input_output[1]])
 
-
 class NoScale:
+    """
+    Dummy function when not using
+    torch.amp.GradScaler for mixed 
+    precision
+    """
     def scale(self, loss):
         return loss
     def step(self, optimizer):
         optimizer.step()
     def update(self):
         pass
+
+def compile_timing(func):
+    """
+    Function to return timing in seconds
+    and result of running func.
+    """
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    start.record()
+    result = func()
+    end.record()
+    torch.cuda.synchronize()
+    return result, start.elapsed_time(end) / 1000
+
+@torch._dynamo.disable
+def optimizer_step(scaler, optimizer):
+    scaler.step(optimizer)
+    scaler.update()
+
+@torch._dynamo.disable
+def scheduler_step(scheduler):
+    scheduler.step()
+
+
