@@ -27,7 +27,7 @@ class FourierNeuralOperator:
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
                 loss:dict=None, profile:dict=None, checkpoint=None,
                 eval_only=False, debug=False, device=None, benchmark=False, 
-                use_amp=False, compile=False, compile_mode='default',data_class='pic'):
+                use_amp=False, compile=False, compile_mode='default', data_class='pic'):
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

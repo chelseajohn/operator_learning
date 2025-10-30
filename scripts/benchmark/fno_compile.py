@@ -33,13 +33,13 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
 parser.add_argument(
-    "--use_amp", type=int, help="mixed precision training  [0:False, 1:True]")
+    "--use_amp", type=int, default=0, help="mixed precision training [0:False, 1:True]")
 parser.add_argument(
-    "--compile_eval", action="store_true", help="use torch.compile for inference")
+    "--compile_eval", type=int, default=0, help="use torch.compile for inference [0:False, 1:True]")
 parser.add_argument(
      "--input_shape", type=int, nargs='+', help="Input tensor shape: e.g., --input_shape 16 4 64 64")
 parser.add_argument(
-    "--compile_train", action="store_true", help="use torch.compile for training")
+    "--compile_train", type=int, default=0, help="use torch.compile for training [0:False, 1:True]")
 parser.add_argument(
     "--compile_mode", type=str, default="default", 
     help="compile options ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']"
@@ -53,9 +53,9 @@ def main(args):
     device_name = torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'
     print_rank0(f'Using torch.compile on {device_name}')
     compile_modes = ['default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']
-    N_Iters = 10
+    N_Iters = 5
 
-    if args.compile_eval:
+    if args.compile_eval == 1:
         from operator_learning.model import FNO
         print_rank0('*' * 120)
         print_rank0('Inference Mode')
@@ -109,7 +109,7 @@ def main(args):
         # print_rank0(df.to_markdown(index=False, tablefmt="grid"))
         print_rank0(df.to_csv(index=False, sep='\t'))
 
-    if args.compile_train:
+    if args.compile_train == 1 :
         from training.train_fno import FourierNeuralOperator
         FourierNeuralOperator.LOSSES_FILE = 'loss.txt'
         FourierNeuralOperator.USE_TENSORBOARD = False

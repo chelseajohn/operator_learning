@@ -33,9 +33,9 @@ parser.add_argument(
 parser.add_argument(
     "--benchmark", action="store_true", help="benchmark run")
 parser.add_argument(
-    "--use_amp", type=int, help="mixed precision training  [0:False, 1:True]")
+    "--use_amp", type=int, default=0, help="mixed precision training  [0:False, 1:True]")
 parser.add_argument(
-    "--compile_train", action="store_true", help="use torch.compile for training")
+    "--compile_train", type=int, default=0, help="use torch.compile for training [0:False, 1:True]")
 parser.add_argument(
     "--compile_mode", type=str, default="default", 
     help="compile options ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']")
@@ -62,7 +62,7 @@ def main(args):
     FourierNeuralOperator.USE_TENSORBOARD = True if not args.disableTensorboard else False
     benchmark = True if args.benchmark else False
     use_amp = True if args.use_amp == 1 else False
-    compile = True if args.compile_train else False
+    compile = True if args.compile_train == 1 else False
     compile_mode = args.compile_mode
 
     if benchmark:
