@@ -6,8 +6,9 @@ Script to benchmark FNO with torch.compile
  'max-autotune': {'max_autotune': True, 'triton.cudagraphs': True}
  }
 Execution Modes:
-- compile_eval: Running inference with different compile modes, required: args.input_shape
-- compile_train: Run training in benchmark mode, required: --compile_mode, optional: args.use_amp
+- compile_eval: Running inference with different compile modes, required: args.input_shape,
+  optional: args.compile_mode if using --compile_eval=1
+- compile_train: Run training in benchmark mode, required: args.compile_mode, optional: args.use_amp
 '''
 
 
@@ -21,6 +22,7 @@ import pandas as pd
 import torch, gc
 import torch.multiprocessing as mp
 from operator_learning.utils.misc import readConfig, print_rank0, compile_timing
+from operator_learning.model import FNO
 torch.set_float32_matmul_precision('high')
 torch._dynamo.config.cache_size_limit = 64  
 
@@ -35,7 +37,7 @@ parser.add_argument(
 parser.add_argument(
     "--use_amp", type=int, default=0, help="mixed precision training [0:False, 1:True]")
 parser.add_argument(
-    "--compile_eval", type=int, default=0, help="use torch.compile for inference [0:False, 1:True]")
+    "--compile_eval", type=int, default=0, help="use torch.compile for inference [0:False, 1:True, 2: run all compile modes]")
 parser.add_argument(
      "--input_shape", type=int, nargs='+', help="Input tensor shape: e.g., --input_shape 16 4 64 64")
 parser.add_argument(
@@ -55,8 +57,7 @@ def main(args):
     compile_modes = ['default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']
     N_Iters = 5
 
-    if args.compile_eval == 1:
-        from operator_learning.model import FNO
+    if args.compile_eval in [0,1,2]:
         print_rank0('*' * 120)
         print_rank0('Inference Mode')
         print_rank0('*' * 120)
@@ -64,7 +65,36 @@ def main(args):
         # FNO model
         model = FNO(**config['model'], device=device).to(device)
         input = torch.rand(*args.input_shape).to(device)
-        
+    
+    # Inference Eager Execution
+    if args.compile_eval == 0:
+        eager_times = []
+        for i in range(N_Iters):
+            with torch.no_grad():
+                _, eager_time = compile_timing(lambda: model(input))
+            eager_times.append(eager_time)
+            print_rank0(f"Eager eval time (s) {i}: {eager_time}")
+        eager_mean = np.mean(eager_times[2:])
+        print_rank0(f"MeanCompileTime (s): {eager_mean}")
+        print_rank0('*' * 120)
+
+    # Inference Compiled Execution
+    elif args.compile_eval == 1:
+        print_rank0(f'Using compile {args.compile_mode} mode:')
+        model.compile(mode=args.compile_mode)
+        compile_times = []
+        for i in range(N_Iters):
+            with torch.no_grad():
+                _, compile_time = compile_timing(lambda: model(input))
+            compile_times.append(compile_time)
+            print_rank0(f"Compile mode eval time (s) in {i}: {compile_time}")
+        compile_mean = np.mean(compile_times[2:])
+        speedup = np.round(eager_mean / compile_mean, 2)
+        print_rank0(f"MeanCompileTime (s): {eager_mean}")
+        print_rank0('*' * 120)
+    
+    # All torch.compile mode
+    elif args.compile_eval == 2:
         # Inference Eager Execution
         eager_times = []
         for i in range(N_Iters):
@@ -106,9 +136,8 @@ def main(args):
                         'Compile(Eval) Mean Time (s)': compile_means,
                             'Speedup': speedup}
                         )
-        # print_rank0(df.to_markdown(index=False, tablefmt="grid"))
-        print_rank0(df.to_csv(index=False, sep='\t'))
-
+        print_rank0(df.to_markdown(index=False, tablefmt="grid"))
+    
     if args.compile_train == 1 :
         from training.train_fno import FourierNeuralOperator
         FourierNeuralOperator.LOSSES_FILE = 'loss.txt'

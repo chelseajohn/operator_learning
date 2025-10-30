@@ -153,11 +153,11 @@ The script benchmarks various compile mode strategies: ['eager', 'default', 'red
 
 To run inference benchmark with all the compile mode strategies do:
 
-`python fno_compile.py --config=config.yaml --compile_eval --input_shape 5 4 256 64`
+`python fno_compile.py --config=config.yaml --compile_eval=2 --input_shape 5 4 256 64`
 
 To run training benchmark with compile mode do:
 
-`python fno_compile.py --config=config.yaml --compile_train --compile_mode=mode`
+`python fno_compile.py --config=config.yaml --compile_train=1 --compile_mode=mode`
 
 where `mode` can be any of the strategies mentioned above.
 
