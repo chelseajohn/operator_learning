@@ -39,7 +39,7 @@ import argparse
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule
 from operator_learning.utils.misc import readConfig, print_rank0
-
+torch.set_float32_matmul_precision('high')
 
 # -----------------------------------------------------------------------------
 # Script parameters
@@ -63,6 +63,14 @@ parser.add_argument(
     "--benchmark", action="store_true", help="benchmark run")
 parser.add_argument(
     "--use_amp", type=int, help="mixed precision training  [0:False, 1:True]")
+parser.add_argument(
+    "--compile_eval", action="store_true", help="use torch.compile for inference")
+parser.add_argument(
+    "--compile_train", action="store_true", help="use torch.compile for training")
+parser.add_argument(
+    "--compile_mode", type=str, default="default", 
+    help="compile options ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']"
+)
 args = parser.parse_args()
 config = readConfig(args.config)
 

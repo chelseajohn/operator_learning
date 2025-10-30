@@ -94,7 +94,7 @@ OR
 - `--config`: Configuration file for evaluation parameters (default: None)  
 
 
-## Profiling & FLOP Calculation
+## Benchmark
 
 ### Profile
 
@@ -141,3 +141,19 @@ The script can calculate FLOP/MAC used by the code using [torchprofile](https://
 
 To get FLOPS for custom operations set:
 `ENABLE_FLOP_WRAPPERS=1 python calc_flops.py --config=config.yaml`
+
+### Torch Compile
+
+The script benchmarks various compile mode strategies: ['eager', 'default', 'reduce-overhead', 'max-autotune','max-autotune-no-cudagraphs'] using `torch.compile` for training and inference.
+
+To run inference benchmark with all the compile mode strategies do:
+
+`python fno_compile.py --config=config.yaml --compile_eval --input_shape 5 4 256 64`
+
+To run training benchmark with compile mode do:
+
+`python fno_compile.py --config=config.yaml --compile_train --compile_mode=mode`
+
+where `mode` can be any of the strategies mentioned above.
+
+Additionally `--use_amp=1` can be used to train with mixed precision.

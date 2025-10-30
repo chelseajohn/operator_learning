@@ -9,13 +9,16 @@ import sys
 from pathlib import Path
 base_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(base_path))
-from operator_learning.utils import flop_wrappers
+import os
+if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
+    from operator_learning.utils import flop_wrappers
 import argparse
 import torch
 import torchprofile
 from calflops import calculate_flops
 from operator_learning.utils.misc import readConfig
 from operator_learning.model import FNO
+torch.set_float32_matmul_precision('high')
 
 # -----------------------------------------------------------------------------
 # Script parameters
