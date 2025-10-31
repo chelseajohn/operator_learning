@@ -64,6 +64,7 @@ def main(args):
         assert 'model' in config, f"config file needs a model section"
         # FNO model
         model = FNO(**config['model'], device=device).to(device)
+        model.print_size()
         input = torch.rand(*args.input_shape).to(device)
     
     # Inference Eager Execution
@@ -89,8 +90,7 @@ def main(args):
             compile_times.append(compile_time)
             print_rank0(f"Compile mode eval time (s) in {i}: {compile_time}")
         compile_mean = np.mean(compile_times[2:])
-        speedup = np.round(eager_mean / compile_mean, 2)
-        print_rank0(f"MeanCompileTime (s): {eager_mean}")
+        print_rank0(f"MeanCompileTime (s): {compile_mean}")
         print_rank0('*' * 120)
     
     # All torch.compile mode
@@ -178,8 +178,4 @@ if __name__ == "__main__":
     mp.set_start_method("spawn", force=True)
     mp.freeze_support()
     main(args)
-    
-
-
-
 

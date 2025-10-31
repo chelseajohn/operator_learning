@@ -192,7 +192,6 @@ class FNO(nn.Module):
 
         return x
 
-
     def print_size(self):
         properties = []
 
