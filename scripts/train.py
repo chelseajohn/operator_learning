@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import sys
+import sys, os
 from pathlib import Path
 base_path = Path(__file__).resolve().parents[1]
 sys.path.append(str(base_path))
@@ -20,6 +20,8 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument(
     "--trainDir", default="trainDir", help="directory to store training results")
+parser.add_argument(
+    "--dataFile", type=str, help="path to Hdf5 data file")
 parser.add_argument(
     "--epochs", default=200, type=int, help="training epochs")
 parser.add_argument(
@@ -72,6 +74,8 @@ def main(args):
 
     if benchmark:
         print_rank0('Running FNO training for benchmarking...')
+        if not os.path.exists(configs['data']['dataFile']):
+            configs['data']['dataFile'] = args.dataFile
     if use_amp:
         print_rank0(f'Using mixed precision for training with float32 and float16...')
         if use_complex_amp:
