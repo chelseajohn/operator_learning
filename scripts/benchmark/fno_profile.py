@@ -65,6 +65,9 @@ parser.add_argument(
 parser.add_argument(
     "--use_amp", type=int, default=0, help="mixed precision training  [0:False, 1:True]")
 parser.add_argument(
+    "--use_complex_amp", type=int, default=0, help="mixed precision training with explicit \
+    complexHalf type  [0:False, 1:True]")
+parser.add_argument(
     "--compile_eval", type=int, default=0, help="use torch.compile for inference [0:False, 1:True]")
 parser.add_argument(
     "--compile_train", type=int, default=0, help="use torch.compile for training [0:False, 1:True]")
@@ -148,19 +151,25 @@ def main(args):
         FourierNeuralOperator.USE_TENSORBOARD = False
         benchmark = True if args.benchmark else False
         use_amp = True if args.use_amp == 1 else False
+        use_complex_amp = True if args.use_complex_amp == 1 else False
 
         if benchmark:
             print_rank0('Running FNO training for benchmarking...')
         if use_amp:
             print_rank0(f'Using mixed precision for training with float32 and float16...')
+            if use_complex_amp:
+                print_rank0(f'Explicit casting to complexHalf and performing GEMM in spectral layer..')
 
         if compile:
             model = FourierNeuralOperator(**configs,debug=False, device=device, \
-                                    benchmark=benchmark, use_amp=use_amp, compile=compile,
+                                    benchmark=benchmark, use_amp=use_amp, \
+                                    use_complex_amp=use_complex_amp, \
+                                    compile=compile, \
                                     compile_mode=compile_mode)
         else:
             model = FourierNeuralOperator(**configs, debug=False, device=device, \
-                                            benchmark=True, use_amp=use_amp,
+                                            benchmark=True, use_amp=use_amp, \
+                                            use_complex_amp=use_complex_amp, \
                                             compile=False)
         model.learn(nEpoch=N_ITER, save_interval=5)
 

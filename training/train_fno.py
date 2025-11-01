@@ -14,6 +14,7 @@ from operator_learning.model import FNO
 from operator_learning.loss import LOSSES_CLASSES
 from operator_learning.utils.communication import Communicator
 from operator_learning.utils.misc import print_rank0, NoScale, compile_timing, optimizer_step, scheduler_step
+from operator_learning.utils.misc import register_dtype_hooks
 torch.set_float32_matmul_precision('high')
 
 class FourierNeuralOperator:
@@ -26,7 +27,7 @@ class FourierNeuralOperator:
     def __init__(self, data:dict=None, model:dict=None, optim:dict=None, 
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
                 loss:dict=None, profile:dict=None, checkpoint=None,
-                eval_only=False, debug=False, device=None, benchmark=False, 
+                eval_only=False, debug=False, device=None, benchmark=False, use_complex_amp=False,
                 use_amp=False, compile=False, compile_mode='default', data_class='pic'):
 
         if device is None:
@@ -38,6 +39,9 @@ class FourierNeuralOperator:
         self.debug = debug
         self.benchmark = benchmark
         self.use_amp = use_amp
+        self.use_complex_amp = use_complex_amp  # explicit casting to Float16 for complex numbers
+        assert not (use_complex_amp and not use_amp), "use_complex_amp=True requires use_amp=True"
+
         self.compile = compile
         self.compile_mode = compile_mode
 
@@ -160,7 +164,9 @@ class FourierNeuralOperator:
     # Setup and utility methods
     # -------------------------------------------------------------------------
     def setupModel(self, model_config):
-        self.model = FNO(**model_config, dataset=self.dataset, dataClass=self.dataClass, device=self.device).to(self.device)
+        self.model = FNO(**model_config, dataset=self.dataset, dataClass=self.dataClass,\
+                          use_complex_amp=self.use_complex_amp, device=self.device).to(self.device)
+        # hooks = register_dtype_hooks(self.model)
         self.modelConfig = model_config.copy()
         print_rank0(self.modelConfig)
         model_df = self.model.print_size()
@@ -389,7 +395,7 @@ class FourierNeuralOperator:
             print_rank0(f"CUDA Memory for Fwd Pass - Allocated: {mean(fwd_peak_mem):.2f} MB")
             print_rank0(f"CUDA Memory for Fwd Pass - Reserved: {mean(fwd_reserv_mem):.2f} MB")
             print_rank0(f"CUDA Memory for Bwd Pass - Allocated: {mean(bwd_peak_mem):.2f} MB")
-            print_rank0(f"CUDA Memory for Fwd Pass - Reserved: {mean(bwd_reserv_mem):.2f} MB")
+            print_rank0(f"CUDA Memory for Bwd Pass - Reserved: {mean(bwd_reserv_mem):.2f} MB")
             print_rank0(f"Estimate Activations Memory: {mean(fwd_peak_mem)-mean(bwd_peak_mem):.2f} MB")
 
         if self.enable_profile:

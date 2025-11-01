@@ -8,7 +8,7 @@ Script to benchmark FNO with torch.compile
 Execution Modes:
 - compile_eval: Running inference with different compile modes, required: args.input_shape,
   optional: args.compile_mode if using --compile_eval=1
-- compile_train: Run training in benchmark mode, required: args.compile_mode, optional: args.use_amp
+- compile_train: Run training in benchmark mode, required: args.compile_mode, optional: args.use_amp, args.use_complex_amp
 '''
 
 
@@ -36,6 +36,9 @@ parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
 parser.add_argument(
     "--use_amp", type=int, default=0, help="mixed precision training [0:False, 1:True]")
+parser.add_argument(
+    "--use_complex_amp", type=int, default=0, help="mixed precision training with explicit \
+    complexHalf type  [0:False, 1:True]")
 parser.add_argument(
     "--compile_eval", type=int, default=0, help="use torch.compile for inference [0:False, 1:True, 2: run all compile modes]")
 parser.add_argument(
@@ -143,6 +146,7 @@ def main(args):
         FourierNeuralOperator.LOSSES_FILE = 'loss.txt'
         FourierNeuralOperator.USE_TENSORBOARD = False
         use_amp = True if args.use_amp == 1 else False
+        use_complex_amp = True if args.use_complex_amp ==1 else False
         sections = ["data", "model", "optim", "lr_scheduler", "parallel_strategy", "loss"]
         for name in sections:
             assert name in config, f"config file needs a {name} section"
@@ -154,12 +158,14 @@ def main(args):
         print_rank0('Running FNO training for benchmarking...')
         if use_amp:
             print_rank0(f'Using mixed precision for training with float32 and float16...')
+            if use_complex_amp:
+                print_rank0(f'Explicit casting to complexHalf and performing GEMM in spectral layer..')
         
         if args.compile_mode == 'eager':
             # Training Eager Execution
             print_rank0(f'Using eager execution')
             model = FourierNeuralOperator(**configs, debug=False, device=device, \
-                                            benchmark=True, use_amp=use_amp,
+                                            benchmark=True, use_amp=use_amp, use_complex_amp=use_complex_amp, \
                                             compile=False)
             model.learn(nEpoch=N_Iters)
    
@@ -167,7 +173,7 @@ def main(args):
             # Training Compiled Execution
             print_rank0(f'Using torch.compile with mode={args.compile_mode}')
             model_opt = FourierNeuralOperator(**configs, debug=False, device=device, \
-                                            benchmark=True, use_amp=use_amp,
+                                            benchmark=True, use_amp=use_amp, use_complex_amp=use_complex_amp, \
                                             compile=True, compile_mode=args.compile_mode)
             model_opt.learn(nEpoch=N_Iters)
 

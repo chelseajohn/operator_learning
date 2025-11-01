@@ -29,6 +29,7 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--lossesFile`: File to write loss values
 - `--benchmark` : To get benchmark matrices
 - `--use_amp` : To use mixed precision training (Float32/Float16)
+- `--use_complex_amp` : To use explicit casting of torch.complex64 to torch.complex32
 - `--compile_train`: To compile `train()` with `torch.compile`
 - `--compile_mode` : `torch.compile` mode ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']
 
@@ -161,4 +162,4 @@ To run training benchmark with compile mode do:
 
 where `mode` can be any of the strategies mentioned above.
 
-Additionally `--use_amp=1` can be used to train with mixed precision.
+Additionally `--use_amp=1` and `--use_complex_amp=1` can be used to train with mixed precision.

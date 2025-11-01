@@ -19,11 +19,12 @@ class FNOLayer(nn.Module):
                  n_dims=2,
                  use_skip_connection=False, 
                  use_postfnochannel_mlp=False,
-                 skip_type='linear'
+                 skip_type='linear',
+                 use_complex_amp=False
                  ):
         super().__init__()
 
-        self.conv = SpectralConv(dv=dv,kX=kX, kY=kY, kZ=kZ, bias=bias, dim=n_dims)
+        self.conv = SpectralConv(dv=dv,kX=kX, kY=kY, kZ=kZ, bias=bias, dim=n_dims, use_complex_amp=use_complex_amp)
         self.use_skip_connection = use_skip_connection
         self.use_postfnochannel_mlp= use_postfnochannel_mlp
        
@@ -101,6 +102,7 @@ class FNO(nn.Module):
                  iZEnd=None,
                  dataset=None,
                  dataClass='pic',
+                 use_complex_amp=False,
                  device='cpu',
                  **kwargs
                  ):
@@ -116,7 +118,10 @@ class FNO(nn.Module):
         self.dataset = dataset if dataClass == 'rbc' else None
         
         if use_dse:
-            transformer = VandermondeTransform(device=device, kX=kX, kY=kY, dataset=dataset, dataClass=dataClass, dim=n_dims)
+            data_type = torch.float16 if use_complex_amp and self.training else torch.float32
+            transformer = VandermondeTransform(device=device, kX=kX, kY=kY, dataset=dataset, \
+                                               dataClass=dataClass, dim=n_dims, \
+                                               dtype=data_type)
         else:
            transformer = None
    
@@ -141,7 +146,8 @@ class FNO(nn.Module):
                           kX=kX, kY=kY, dataClass=dataClass,
                           non_linearity=non_linearity,
                           bias=bias,
-                          dim=n_dims)
+                          dim=n_dims,
+                          use_complex_amp=use_complex_amp)
                  for _ in range(n_layers)])
         else:
             self.layers = nn.ModuleList(
@@ -151,7 +157,8 @@ class FNO(nn.Module):
                           n_dims=n_dims,
                           use_skip_connection=use_skip_connection,
                           use_postfnochannel_mlp=use_postfnochannel_mlp,
-                          skip_type=skip_type)
+                          skip_type=skip_type,
+                          use_complex_amp=use_complex_amp)
                  for _ in range(n_layers)])
 
 

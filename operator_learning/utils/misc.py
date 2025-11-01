@@ -14,13 +14,10 @@ def readConfig(config):
 
 def format_complexTensor(weight):
     """
-    Convert torch.cfloat (torch.complex64) 
-    to torch.float32 for torch DDP with 
+    Convert complex to real for torch DDP with 
     NCCL communication
-  
     """
-  
-    if weight.dtype == torch.complex64:
+    if weight.is_complex():
         R = torch.view_as_real(weight)
     else:
         R  = weight
@@ -28,15 +25,12 @@ def format_complexTensor(weight):
 
 def deformat_complexTensor(weight):  
     """
-    Convert torch.float32 to torch.cfloat
-    (torch.complex64) for computation
-  
+    Convert real to complex 
     """
-
-    if weight.dtype != torch.complex64:
-        R = torch.view_as_complex(weight)
+    if weight.is_complex():
+        R = weight
     else:
-        R  = weight
+        R  = torch.view_as_complex(weight)
     return R
 
 @torch._dynamo.disable
@@ -64,6 +58,8 @@ def einsum_complexhalf(eq, *args):
 
     # view_as_real: [..., 2] in torch.float16
     for label, input in tensors.items():
+        if input.is_conj():
+            input = input.resolve_conj()
         input = torch.view_as_real(input)
         if input.dtype != torch.float16:
             input = input.half()
@@ -138,4 +134,21 @@ def optimizer_step(scaler, optimizer):
 def scheduler_step(scheduler):
     scheduler.step()
 
+def dtype_debug_hook(module, input, output):
+    # Get input dtypes
+    input_dtypes = [i.dtype if isinstance(i, torch.Tensor) else type(i) for i in input]
+    output_dtype = output.dtype if isinstance(output, torch.Tensor) else type(output)
+    
+    print(f"[Hook] {module.__class__.__name__}")
+    print(f"  ├─ input dtypes: {input_dtypes}")
+    print(f"  ├─ output dtype: {output_dtype}")
+    print(f"  └─ device: {output.device if isinstance(output, torch.Tensor) else 'N/A'}\n")
 
+def register_dtype_hooks(model):
+    hooks = []
+    for _, module in model.named_modules():
+        # Skip the top-level model container itself
+        if len(list(module.children())) == 0:
+            hook = module.register_forward_hook(dtype_debug_hook)
+            hooks.append(hook)
+    return hooks
