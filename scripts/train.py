@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import sys
+import sys, os
 from pathlib import Path
 base_path = Path(__file__).resolve().parents[1]
 sys.path.append(str(base_path))
@@ -21,6 +21,8 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     "--trainDir", default="trainDir", help="directory to store training results")
 parser.add_argument(
+    "--dataFile", type=str, help="path to Hdf5 data file")
+parser.add_argument(
     "--epochs", default=200, type=int, help="training epochs")
 parser.add_argument(
     "--checkpoint", help="model checkpoint name")
@@ -35,6 +37,9 @@ parser.add_argument(
 parser.add_argument(
     "--use_amp", type=int, default=0, help="mixed precision training  [0:False, 1:True]")
 parser.add_argument(
+    "--use_complex_amp", type=int, default=0, help="mixed precision training with explicit \
+    complexHalf type  [0:False, 1:True]")
+parser.add_argument(
     "--compile_train", type=int, default=0, help="use torch.compile for training [0:False, 1:True]")
 parser.add_argument(
     "--compile_mode", type=str, default="default", 
@@ -46,6 +51,7 @@ args = parser.parse_args()
 def main(args):
     config = readConfig(args.config)
     if "train" in config:
+        print(f'Overwriting args with config values..')
         args.__dict__.update(**config.train)
 
     sections = ["data", "model", "optim", "lr_scheduler", "parallel_strategy", "loss"]
@@ -62,18 +68,23 @@ def main(args):
     FourierNeuralOperator.USE_TENSORBOARD = True if not args.disableTensorboard else False
     benchmark = True if args.benchmark else False
     use_amp = True if args.use_amp == 1 else False
+    use_complex_amp = True if args.use_complex_amp == 1 else False
     compile = True if args.compile_train == 1 else False
     compile_mode = args.compile_mode
 
     if benchmark:
         print_rank0('Running FNO training for benchmarking...')
+        if not os.path.exists(configs['data']['dataFile']):
+            configs['data']['dataFile'] = args.dataFile
     if use_amp:
         print_rank0(f'Using mixed precision for training with float32 and float16...')
+        if use_complex_amp:
+            print_rank0(f'Explicit casting to complexHalf and performing GEMM in spectral layer..')
     if compile:
         print_rank0(f'Using torch.compile in mode={compile_mode}')
 
     model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False,\
-                                benchmark=benchmark, use_amp=use_amp, \
+                                benchmark=benchmark, use_amp=use_amp, use_complex_amp=use_complex_amp, \
                                 compile=compile, compile_mode=compile_mode)
     model.learn(args.epochs, args.saveInterval)
 

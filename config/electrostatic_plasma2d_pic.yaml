@@ -15,9 +15,9 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: pic_electrostatic_plasma2D.h5
+  dataFile: fno_data/PIC2D_electrostatic.h5
   trainRatio: 0.8
-  batchSize:  1        # Global Batch size 
+  batchSize:  8        # Global Batch size 
   sampling_mode: None  # [fixed, ordered, random]
  
 
@@ -66,10 +66,10 @@ parallel_strategy:
 
 train:
   trainDir: PIC2D
-  epochs: 10                     # nEpochs
+  epochs: 5                     # nEpochs
   checkpoint: None
   saveInterval: 5
-  disableTensorboard: false
+  disableTensorboard: true
 
 eval:
   runId: 1
@@ -95,5 +95,5 @@ profile:
   benchmark: true
   compile_eval: 0       
   compile_train: 0
-  comipile_mode: default    # compiler mode 
+  compile_mode: default    # compiler mode 
  

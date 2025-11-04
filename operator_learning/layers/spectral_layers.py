@@ -23,11 +23,12 @@ class SpectralConv(nn.Module):
                  kY=None,
                  kZ=None,
                  bias=False,
-                 dim=2
+                 dim=2,
+                 use_complex_amp=False
     ):
         super().__init__()
 
-        assert dim in (1,2, 3), "Only till 3D supported"
+        assert dim in (1, 2, 3), "Only till 3D supported"
         self.dim = dim
         self.dv = dv
         # Number of Fourier modes to multiply, at most floor(N/2) + 1
@@ -35,8 +36,9 @@ class SpectralConv(nn.Module):
         self.kX = kX           
         self.kY = kY
         self.kZ = kZ 
+        self.use_complex_amp = use_complex_amp
 
-        # R
+        # R must be in torch.cfloat for torch.fft
         if dim ==1:
             operator_weights = torch.rand(dv, dv, kX, dtype=torch.cfloat)
 
@@ -58,19 +60,25 @@ class SpectralConv(nn.Module):
         else:
             self.bias = None
 
+ 
     def T(self, kMax, n, device, sym=False):
+        if self.training and self.use_complex_amp:
+            dtype = torch.complex32
+        else:
+            dtype = torch.cfloat
+
         T = torch.cat([
-            torch.eye(kMax, dtype=torch.cfloat, device=device),                  # Top-left identity
-            torch.zeros(kMax, n - kMax, dtype=torch.cfloat, device=device)       # Zero-pad to match n columns
-        ], dim=1)                                                 # Shape: [kMax, n]
+            torch.eye(kMax, dtype=dtype, device=device),                  # Top-left identity
+            torch.zeros(kMax, n - kMax, dtype=dtype, device=device)       # Zero-pad to match n columns
+        ], dim=1)                                                         # Shape: [kMax, n]
 
         if sym:
             Tinv = torch.cat([
-                torch.zeros(kMax, n - kMax, dtype=torch.cfloat, device=device),   # Zero-pad on the left
-                torch.eye(kMax, dtype=torch.cfloat,device=device)                # Bottom-right identity
-            ], dim=1)                                              # Shape: [kMax, n]
+                torch.zeros(kMax, n - kMax, dtype=dtype, device=device),   # Zero-pad on the left
+                torch.eye(kMax, dtype=dtype, device=device)                # Bottom-right identity
+            ], dim=1)                                                      # Shape: [kMax, n]
             
-            T = torch.cat([T, Tinv], dim=0)                        # Final shape: [2*kMax, n]
+            T = torch.cat([T, Tinv], dim=0)                                # Final shape: [2*kMax, n]
 
         return T
 
@@ -80,6 +88,9 @@ class SpectralConv(nn.Module):
         x[nBatch, dv, nX, nY] -> [nBatch, dv, fX = nX, fY = nY/2+1]
         x[nBatch, dv, nX, nY, nZ] -> [nBatch, dv, fX = nX, fY = nY, fZ = nZ/2+1]
         """
+        if x.dtype == torch.float16:
+            x = x.float()  # cast to float32 for FFT
+
         if self.dim == 1:
             x = torch.fft.rfft(x, dim=-1, norm="ortho")
         elif self.dim == 2:
@@ -94,6 +105,9 @@ class SpectralConv(nn.Module):
         x[nBatch, dv, fX = nX, fY = nY/2+1] -> [nBatch, dv, nX, nY]
         x[nBatch, dv, fX = nX, fY = nY, fZ = nZ/2+1] -> [nBatch, dv, nX, nY, nZ]
         """
+        if x.dtype == torch.complex32:
+            x = x.cfloat()  # cast to complex64 for IFFT
+
         if self.dim == 1:
             x = torch.fft.irfft(x, n=org_size[-1], dim=-1, norm="ortho")
         elif self.dim == 2:
@@ -106,14 +120,19 @@ class SpectralConv(nn.Module):
     def forward(self, x:torch.tensor):
         """ x[nBatch, dv, nX, nY, ..] -> [nBatch, dv, nX, nY, ..] """
         org_size = x.shape[-self.dim:]
+
         # Transform to Fourier space -> [nBatch, dv, fX, fY,..]
-        x = self._toFourierSpace(x)
+        x = self._toFourierSpace(x)  # complex64
         f_dims = x.shape[-self.dim:]
 
-        R = deformat_complexTensor(self.R).to(x.device)     
-        use_complexhalf = (R.dtype == torch.complex32 or x.dtype == torch.complex32)
-        einsum_fn = einsum_complexhalf if use_complexhalf else torch.einsum
-
+        if self.training and self.use_complex_amp:
+            einsum_fn = einsum_complexhalf
+            R = deformat_complexTensor(self.R.half()).to(x.device)  # complex32
+            x = torch.complex(x.real.half(), x.imag.half())         # complex32
+        else:
+            einsum_fn = torch.einsum
+            R = deformat_complexTensor(self.R).to(x.device)     # complex64
+            
         if self.dim == 1:
             Tx = self.T(self.kX, f_dims[0], x.device, sym=False)
             # -- Tx[kX, fX]
@@ -151,11 +170,11 @@ class SpectralConv(nn.Module):
            # Padding on high frequency modes -> [nBatch, dv, fX, fY, fZ]
             x = einsum_fn("xa,yb,zc,eiabc->eixyz", Tx.T, Ty.T, Tz.T, x)
 
-
         # Transform back to Real space -> [nBatch, dv, nX, nY, ..]
         # Need to pass signal orginal shape to round irfftn() 
         # if last dim is odd
         x = self._toRealSpace(x, org_size)
+        x = x.half() if self.training and self.use_complex_amp else x   # float16
 
         if self.bias is not None:
             x = x + self.bias

@@ -24,7 +24,7 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: dataset_256x64_Ra1e7_dt1e-3_update.h5
+  dataFile: fno_data/RBC2D_256x64_Ra1e7_dt1e-3_update.h5
   trainRatio: 0.8
   batchSize: 20        # Global Batch size
   sampling_mode: None  # [fixed, ordered, random]
@@ -85,7 +85,7 @@ train:
   epochs: 5                             # nEpochs
   checkpoint: None
   saveInterval: 5
-  disableTensorboard: false
+  disableTensorboard: true
 
 eval:
   iSimu: 0
@@ -105,4 +105,4 @@ profile:
   benchmark: true
   compile_eval: 0      
   compile_train: 0
-  comipile_mode: default    # compiler mode 
+  compile_mode: default    # compiler mode 

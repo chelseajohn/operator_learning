@@ -23,8 +23,7 @@ data:
   xStep: 1
   yStep: 1
   zStep: 1
-  dataFile: RBC3DG4Ra1e5-res32_solution.h5
-  trainRatio: 0.8
+  dataFile: fno_data/RBC3D_64x64x32_Ra1e5_dt0_5_solution.h5
   batchSize: 20        # Global Batch size
   sampling_mode: None  # Domain Sampling: [fixed, ordered, random]
   pad_to_fullGrid: false
@@ -86,7 +85,7 @@ train:
   epochs: 5                     # nEpochs
   checkpoint: None
   saveInterval: 5
-  disableTensorboard: false
+  disableTensorboard: true
 
 eval:
   nSamples: 100
@@ -107,5 +106,5 @@ profile:
   benchmark: true
   compile_eval: 0      
   compile_train: 0
-  comipile_mode: default    # compiler mode 
+  compile_mode: default    # compiler mode 
  
