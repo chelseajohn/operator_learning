@@ -92,7 +92,9 @@ profile:
   evalOnly: false
   input_shape: [1,3,10000]   # relevant only if evalOnly=true or compile_eval=true
   use_amp: 0
+  use_complex_amp: 0
   benchmark: true
+  niter: 5
   compile_eval: 0       
   compile_train: 0
   compile_mode: default    # compiler mode 

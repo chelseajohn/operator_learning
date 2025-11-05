@@ -63,6 +63,8 @@ parser.add_argument(
 parser.add_argument(
     "--benchmark", action="store_true", help="benchmark run")
 parser.add_argument(
+    "--niter", type=int, default=5, help="number of epochs")
+parser.add_argument(
     "--use_amp", type=int, default=0, help="mixed precision training  [0:False, 1:True]")
 parser.add_argument(
     "--use_complex_amp", type=int, default=0, help="mixed precision training with explicit \
@@ -82,7 +84,7 @@ def main(args):
     if "profile" in config:
         args.__dict__.update(**config.profile)
         print_rank0(f'Using profiler args: {args.__dict__}')
-
+    N_ITER = args.niter
     os.makedirs(args.profileDir, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     device_name = torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'
@@ -110,7 +112,6 @@ def main(args):
         activities = [ProfilerActivity.CUDA] # ProfilerActivity.CPU
         sort_by_keyword = str(device)+ "_time_total"
         fno_schedule = schedule(skip_first=0, wait=0, warmup=1, active=3, repeat=1)
-        N_ITER = 5
 
         with profile(
             activities=activities, 
@@ -139,7 +140,6 @@ def main(args):
         print_rank0('*' * 120)
         print_rank0(prof.key_averages().table(sort_by=sort_by_keyword, row_limit=10))
         print_rank0('*' * 120)
-
     else:
         from training.train_fno import FourierNeuralOperator
         sections = ["data", "model", "optim", "lr_scheduler", "parallel_strategy", "loss", "profile"]
