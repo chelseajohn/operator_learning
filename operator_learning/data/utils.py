@@ -124,7 +124,7 @@ def getDataLoaders(dataFile,
         valid_batchSize = local_batchSize
 
     print_rank0(f'Using GlobalBatchSize: {batchSize} and localBatchSize: {local_batchSize}')
-    trainLoader = DataLoader(trainSet, batch_size=train_batchSize, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=num_workers, collate_fn=collate_fn, pin_memory=True)
-    valLoader = DataLoader(valSet, batch_size=valid_batchSize, sampler=val_sampler, shuffle=False, num_workers=num_workers, collate_fn=collate_fn, pin_memory=True)
+    trainLoader = DataLoader(trainSet, batch_size=train_batchSize, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
+    valLoader = DataLoader(valSet, batch_size=valid_batchSize, sampler=val_sampler, shuffle=False, num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
 
     return trainLoader, valLoader, dataset
