@@ -48,18 +48,18 @@ parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
 args = parser.parse_args()
 
+config = readConfig(args.config)
+if "train" in config:
+    print(f'Overwriting args with config values..')
+    args.__dict__.update(**config.train)
+
+sections = ["data", "model", "optim", "lr_scheduler", "parallel_strategy", "loss"]
+for name in sections:
+    assert name in config, f"config file needs a {name} section"
+# trainer class configs, "loss" parameter uses default if not specified
+configs = {name: config.get(name) for name in (sections)}
+
 def main(args):
-    config = readConfig(args.config)
-    if "train" in config:
-        print(f'Overwriting args with config values..')
-        args.__dict__.update(**config.train)
-
-    sections = ["data", "model", "optim", "lr_scheduler", "parallel_strategy", "loss"]
-    for name in sections:
-        assert name in config, f"config file needs a {name} section"
-    # trainer class configs, "loss" parameter uses default if not specified
-    configs = {name: config.get(name) for name in (sections)}
-
     # -----------------------------------------------------------------------------
     # Script execution
     # -----------------------------------------------------------------------------
@@ -92,6 +92,7 @@ def main(args):
         torch.distributed.destroy_process_group()
 
 if __name__ == "__main__":
-    mp.set_start_method("spawn", force=True)
-    mp.freeze_support()
+    if args.compile_train == 1:
+        mp.set_start_method("spawn", force=True)
+        mp.freeze_support()
     main(args)

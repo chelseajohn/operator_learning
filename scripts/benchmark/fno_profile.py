@@ -126,7 +126,6 @@ def main(args):
                 for _ in range(N_ITER):
                     with torch.no_grad(): 
                         torch.cuda.reset_peak_memory_stats()
-                        torch.cuda.synchronize()
                         start = torch.cuda.memory_allocated()  
                         model(input)
                         torch.cuda.synchronize()
