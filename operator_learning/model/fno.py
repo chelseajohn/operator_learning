@@ -9,7 +9,7 @@ from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
-torch.set_float32_matmul_precision('high')
+
 
 class FNOLayer(nn.Module):
 
@@ -214,6 +214,9 @@ class FNO(nn.Module):
         return elementFrame
 
 if __name__ == "__main__":
+    # enable TF32 on A100 
+    from operator_learning.utils.misc import enable_tf32_only_on_a100
+    enable_tf32_only_on_a100()
     # Quick script testing
     model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True)
     model2D = FNO(da=3, dv=6, du=2, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True)

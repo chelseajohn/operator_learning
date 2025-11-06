@@ -14,8 +14,8 @@ from operator_learning.model import FNO
 from operator_learning.loss import LOSSES_CLASSES
 from operator_learning.utils.communication import Communicator
 from operator_learning.utils.misc import print_rank0, NoScale, compile_timing, optimizer_step, scheduler_step
-from operator_learning.utils.misc import register_dtype_hooks
-torch.set_float32_matmul_precision('high')
+from operator_learning.utils.misc import register_dtype_hooks, enable_tf32_only_on_a100
+
 
 class FourierNeuralOperator:
     
@@ -719,6 +719,7 @@ class FourierNeuralOperator:
     # Inference method
     # -------------------------------------------------------------------------
     def __call__(self, u0, nEval=1):
+        enable_tf32_only_on_a100()
         model = self.model.eval()
         inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
     

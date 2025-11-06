@@ -152,3 +152,27 @@ def register_dtype_hooks(model):
             hook = module.register_forward_hook(dtype_debug_hook)
             hooks.append(hook)
     return hooks
+
+def enable_tf32_only_on_a100():
+    """
+    Function to switch on TF32 on A100
+    """
+    if not torch.cuda.is_available():
+        print_rank0("No CUDA device found.")
+        return
+
+    device = torch.cuda.current_device()
+    name = torch.cuda.get_device_name(device)
+    major, minor = torch.cuda.get_device_capability(device)
+
+    # A100 = compute capability 8.0
+    is_a100 = (major == 8 and minor == 0) or ("A100" in name)
+
+    if is_a100:
+        torch.set_float32_matmul_precision("high")  # Enable TF32 matmul
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+        print_rank0(f"TF32 enabled on A100: {name}")
+    else:
+        print_rank0(f"Not an A100 → TF32 NOT enabled: {name}")

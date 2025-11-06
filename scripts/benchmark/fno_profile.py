@@ -39,8 +39,7 @@ import argparse
 import torch
 import torch.multiprocessing as mp
 from torch.profiler import profile, ProfilerActivity, schedule
-from operator_learning.utils.misc import readConfig, print_rank0
-torch.set_float32_matmul_precision('high')
+from operator_learning.utils.misc import readConfig, print_rank0, enable_tf32_only_on_a100
 
 # -----------------------------------------------------------------------------
 # Script parameters
@@ -176,8 +175,10 @@ def main(args):
             torch.distributed.destroy_process_group()
 
 if __name__ == "__main__":
-    mp.set_start_method("spawn", force=True)
-    mp.freeze_support()
+    enable_tf32_only_on_a100()
+    if args.compile_train == 1:
+        mp.set_start_method("spawn", force=True)
+        mp.freeze_support()
     main(args)
     
 

@@ -16,9 +16,9 @@ import argparse
 import torch
 import torchprofile
 from calflops import calculate_flops
-from operator_learning.utils.misc import readConfig
+from operator_learning.utils.misc import readConfig, enable_tf32_only_on_a100
 from operator_learning.model import FNO
-torch.set_float32_matmul_precision('high')
+enable_tf32_only_on_a100()
 
 # -----------------------------------------------------------------------------
 # Script parameters
