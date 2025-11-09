@@ -50,7 +50,7 @@ args = parser.parse_args()
 
 config = readConfig(args.config)
 if "train" in config:
-    print(f'Overwriting args with config values..')
+    print_rank0(f'Overwriting args with config values..')
     args.__dict__.update(**config.train)
 
 sections = ["data", "model", "optim", "lr_scheduler", "parallel_strategy", "loss"]
