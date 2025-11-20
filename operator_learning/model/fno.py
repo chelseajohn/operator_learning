@@ -125,16 +125,16 @@ class FNO(nn.Module):
         else:
            transformer = None
    
-        self.P = MLP( mode='channel',
+        self.P = MLP( mode='linear',
                         n_dims=n_dims,
-                        n_layers=scaling_layers,
+                        n_layers=1,
                         in_channels=da,
                         out_channels=dv,
                         hidden_channels=round(dv*channel_mlp_expansion),
                     )
-        self.Q = MLP( mode='channel',
+        self.Q = MLP( mode='linear',
                         n_dims=n_dims,
-                        n_layers=scaling_layers,
+                        n_layers=2,
                         in_channels=dv,
                         out_channels=du,
                         hidden_channels=round(dv*channel_mlp_expansion),

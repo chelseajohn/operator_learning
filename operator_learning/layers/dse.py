@@ -4,7 +4,8 @@ if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
 import torch
 import torch.nn as nn
 from operator_learning.utils.misc import format_complexTensor, deformat_complexTensor, einsum_complexhalf
-from .linear import GridLinear
+#from .linear import GridLinear
+from .mlp import MLP
 
 class SpectralConv_dse(nn.Module):
     def __init__(self, dv, transformer, kX, kY=None, dataClass='pic', bias=False, dim=2, use_complex_amp=False):
@@ -19,7 +20,8 @@ class SpectralConv_dse(nn.Module):
         
         self.scale = 1 / (dv * dv)
         if dim ==1:
-            self.kX_sym = int(kX/2) + 1
+            #self.kX_sym = int(kX/2) + 1
+            self.kX_sym = int(kX/2)
             weights1 = self.scale * torch.rand(dv, dv, self.kX_sym, dtype=torch.cfloat)
             weights2 = self.scale * torch.rand(dv, dv, self.kX_sym, dtype=torch.cfloat)
             self.R1 = nn.Parameter(format_complexTensor(weights1))
@@ -129,11 +131,19 @@ class DSELayer(nn.Module):
         self.conv = SpectralConv_dse(dv, transformer, kX, kY, dataClass, bias, dim, use_complex_amp)
         if dataClass == 'pic':
             dim = 1 # same execution as 1D since y-cord is a channel
-        self.W = GridLinear(
-                        inSize=dv, outSize=dv, hiddenSize=None,
-                        bias=bias, n_layers=1, non_linearity=self.sigma,
-                        n_dims=dim, 
-                        )
+        #self.W = GridLinear(
+        #                inSize=dv, outSize=dv, hiddenSize=None,
+        #                bias=bias, n_layers=1, non_linearity=self.sigma,
+        #                n_dims=dim, 
+        #                )
+        self.W = MLP( mode='channel',
+                        n_dims=1,
+                        n_layers=1,
+                        in_channels=dv,
+                        out_channels=dv,
+                        hidden_channels=None,
+                    )
+ 
         
 
     def forward(self, x):
