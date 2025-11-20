@@ -7,7 +7,7 @@ base_path = Path(__file__).resolve().parents[1]
 sys.path.append(str(base_path))
 import numpy as np
 from scipy import sparse
-import finufft
+#import finufft
 from dynamics import toPeriodic
 
 def interpMatrix(XP: np.ndarray, wp: float, DX: np.ndarray, N: int, NG: int, p: np.ndarray,L: np.ndarray, dim:int) -> sparse.csr_matrix:

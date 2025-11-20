@@ -15,7 +15,7 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: fno_data/PIC1D_electrostatic.h5
+  dataFile: /p/project1/pepcexa/muralikrishnan1/operator_learning/PIC1D_electrostatic.h5
   trainRatio: 0.8
   batchSize: 20        # Global Batch size
   sampling_mode: None  # [fixed, ordered, random]
@@ -64,9 +64,9 @@ parallel_strategy:
 
 train:
   trainDir: PIC1D
-  epochs: 5                     # nEpochs
+  epochs: 100                     # nEpochs
   checkpoint: None
-  saveInterval: 5
+  saveInterval: 50
   disableTensorboard: true
 
 eval:
@@ -76,10 +76,10 @@ eval:
   dim: 1
   kc : 0.5
   NG : 32
-  T: 5
+  T: 10
   dt: 0.05
   Vt: 1
-  nParticle: 50
+  nParticle: 100000
   Qm : -1
   alpha: 0.5
 

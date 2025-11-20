@@ -69,7 +69,8 @@ if checkpoint is not None:
     fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
     if dim == 1:
         posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model)
-        phase_spacePred = vis.phase_space(xp=posPred, vp=velPred, wp=wPred, ml_acc=True)
+        #phase_spacePred = vis.phase_space(xp=posPred, vp=velPred, wp=wPred, ml_acc=True)
+        phase_spacePred = None
     else:
         posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
         phase_spacePred = None
@@ -87,12 +88,13 @@ else:
 
 if dim == 1:
     posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic1D(ml_acc=False)
-    phase_spaceRef = vis.phase_space(xp=posRef, vp=velRef, wp=wRef, ml_acc=False)
+    #phase_spaceRef = vis.phase_space(xp=posRef, vp=velRef, wp=wRef, ml_acc=False)
+    phase_spaceRef = None
 else:
     posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic2D(ml_acc=False)
     phase_spaceRef = None
 
-growth_rate = vis.twoStreamIppl(ExRef=ERef, ExPred=EPred)  
+#growth_rate = vis.twoStreamIppl(ExRef=ERef, ExPred=EPred)  
 energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EkPred=EkPred, EpRef=EpRef, EpPred=EpPred)
 conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
 landau_decay = vis.landau_decay(phiMax=ERef, phiMaxPred=EPred)
@@ -137,10 +139,9 @@ summary.write(TEMPLATE.format(
         landau_decay=landau_decay,
         phase_spaceRef=phase_spaceRef,
         phase_spacePred=phase_spacePred,
-        growth_rate=growth_rate,
+        growth_rate=None,
         timeRef=timeRef,
         timePred=timePred,
         speedup=speedup
         ))
-
 summary.close()

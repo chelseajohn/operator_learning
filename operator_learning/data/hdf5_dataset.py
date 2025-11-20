@@ -4,7 +4,7 @@ import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from operator_learning.data.problems.rbc2D.dedalus_prop import OutputFiles
+#from operator_learning.data.problems.rbc2D.dedalus_prop import OutputFiles
 from operator_learning.utils.misc import print_rank0
 
 class RBCDataset(Dataset):
