@@ -180,7 +180,10 @@ class FNO(nn.Module):
         """
 
        
+        #print_rank0(f'Shape of Px: {x.shape}')
+        x = x.permute(0,2,1)
         x = self.P(x)
+        x = x.permute(0,2,1)
         # print_rank0(f'Shape of Px: {x.shape}')
 
         for index,layer in enumerate(self.layers):
@@ -194,7 +197,9 @@ class FNO(nn.Module):
                 print_rank0(f' & z-subdomain {self.iZBeg, self.iZEnd} ')
                 x = x [:, :, :, :, self.iZBeg: self.iZEnd]
 
+        x = x.permute(0,2,1)
         x = self.Q(x)
+        x = x.permute(0,2,1)
         # print_rank0(f'Shape of Qx: {x.shape}')
 
         return x
