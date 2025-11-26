@@ -3,6 +3,7 @@ from pathlib import Path
 base_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(base_path))
 import numpy as np
+import cupy as cp
 import time
 from scipy import sparse
 import matplotlib.pyplot as plt
@@ -32,11 +33,11 @@ class PICVisualizer:
         self.T = args.T
         self.VT = args.Vt
         self.NT = int(self.T/self.DT) 
-        self.times = np.linspace(0, self.NT * self.DT, self.NT)   # number of time steps
+        self.times = cp.linspace(0, self.NT * self.DT, self.NT)   # number of time steps
         self.dim = args.dim
-        self.k = np.array([args.kc]*self.dim)
-        self.L = 2*np.pi/self.k                                   # Length of the container  
-        self.dx = np.array(self.L / self.NG)                      # cell length        
+        self.k = cp.array([args.kc]*self.dim)
+        self.L = 2*cp.pi/self.k                                   # Length of the container  
+        self.dx = cp.array(self.L / self.NG)                      # cell length        
         self.alpha = args.alpha
         
         if self.dim == 1:                                                             
@@ -74,9 +75,9 @@ class PICVisualizer:
 
         Returns:
             tuple: (xp, vp, wp, E, Ek, Ep, momentum, Exp) where
-                xp (np.ndarray): Final particle positions (shape: [N]).
-                vp (np.ndarray): Final particle velocities (shape: [N]).
-                wp (float or np.ndarray): Particle weights.
+                xp (cp.ndarray): Final particle positions (shape: [N]).
+                vp (cp.ndarray): Final particle velocities (shape: [N]).
+                wp (float or cp.ndarray): Particle weights.
                 E (list[float]): Total energy per time step.
                 Ek (list[float]): Kinetic energy per time step.
                 Ep (list[float]): Potential energy per time step.
@@ -92,14 +93,14 @@ class PICVisualizer:
         """
         # Storage arrays
         pos = np.zeros([self.NT, self.N], dtype=np.float32)
-        Eout = np.zeros([self.NT, self.N], dtype=np.float32)
+        Eout = cp.zeros([self.NT, self.N], dtype=cp.float32)
         p = np.arange(self.N, dtype=int)
         # Build Q-charge  array
-        charge = np.full(pos.shape[1], -4 * np.pi, dtype=np.float32)
+        charge = cp.full(pos.shape[1], -4 * cp.pi, dtype=cp.float32)
 
         # Initial particle positions and velocities
         xt = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
-        vp = np.random.randn(self.N)
+        vp = cp.random.randn(self.N)
         wp = 1.0
 
         # Energy and momentum tracking
@@ -113,13 +114,13 @@ class PICVisualizer:
             xp = toPeriodic(xt, self.L)
 
             # Store particle positions
-            pos[it, :] = xp.astype(np.float32)
+            pos[it, :] = xp.astype(cp.float32)
         
             # Acceleration
             if ml_acc and model is not None:
                 t0 = time.time()
                 # Stack pos and rho
-                features = np.stack([pos[it, :], charge], axis=0)
+                features = cp.stack([pos[it, :], charge], axis=0)
                 inputs = features[None, :, :]    # [batch=1, particles, features]
                 Eout[it, :] = model(inputs).flatten()
                 a = accelerateML(E=Eout, wp=wp, QM=self.QM)
@@ -143,7 +144,7 @@ class PICVisualizer:
             xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.L, it=it)
 
             # Electric field energy
-            Egp = np.sum(Eout[it, :] ** 2) * self.L / self.N
+            Egp = cp.sum(Eout[it, :] ** 2) * self.L / self.N
 
             # Compute potential energy
             # Epotential = potential(rho=rho, phi=phi, dx=self.dx, dim=self.dim)
@@ -154,7 +155,7 @@ class PICVisualizer:
             Ep.append(Epotential)
             E.append(kinetic + Epotential)
             Exp.append(Egp)
-            momentum.append(np.abs(np.sum(self.Q * vp / self.QM)))
+            momentum.append(cp.abs(cp.sum(self.Q * vp / self.QM)))
 
         time_acc_mean = np.round(np.mean(times_acc)*(10**6),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} microsec")
