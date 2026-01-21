@@ -6,12 +6,13 @@ from pathlib import Path
 base_path = Path(__file__).resolve().parents[1]
 sys.path.append(str(base_path))
 import numpy as np
+import cupy as cp
 from energy import kinetic
 from initial_conditions import findsource
 
-def accelerate(M: np.ndarray, 
-               E: np.ndarray,
-               Eout: np.ndarray, 
+def accelerate(M: cp.ndarray, 
+               E: cp.ndarray,
+               Eout: cp.ndarray, 
                wp: float, 
                QM: float,
                it: int,
@@ -20,50 +21,50 @@ def accelerate(M: np.ndarray,
     Compute particle acceleration from grid electric field and store E at the current timestep.
 
     Args:
-        M (np.ndarray): Projection/interpolation matrix from grid to particle positions.
-        E (np.ndarray): Electric field on the grid.
-        Eout (np.ndarray): Array to store electric field at each timestep.
+        M (cp.ndarray): Projection/interpolation matrix from grid to particle positions.
+        E (cp.ndarray): Electric field on the grid.
+        Eout (cp.ndarray): Array to store electric field at each timestep.
         wp (float): Particle weights.
         QM (float): Charge-to-mass ratio (q/m).
         it (int): Current timestep index.
         dim (int): dimension (1D/2D)
 
     Returns:
-        a (np.ndarray): Particle accelerations.
-        Eout (np.ndarray): Updated electric field history.
+        a (cp.ndarray): Particle accelerations.
+        Eout (cp.ndarray): Updated electric field history.
     """
     if dim == 1:
         Etemp = M * E
-        a = np.transpose(Etemp) * QM / wp
-        Eout[it, :] = Etemp.astype(np.float32)
+        a = cp.transpose(Etemp) * QM / wp
+        Eout[it, :] = Etemp.astype(cp.float32)
     else:
         Extemp = M * E[0].flatten()
         Eytemp = M * E[1].flatten()
-        a1 = np.transpose(Extemp) * QM / wp
-        a2 = np.transpose(Eytemp) * QM / wp
-        Eout[it,:,0] = Extemp.astype(np.float32)
-        Eout[it,:,1] = Eytemp.astype(np.float32)
-        a = np.array([a1, a2])
+        a1 = cp.transpose(Extemp) * QM / wp
+        a2 = cp.transpose(Eytemp) * QM / wp
+        Eout[it,:,0] = Extemp.astype(cp.float32)
+        Eout[it,:,1] = Eytemp.astype(cp.float32)
+        a = cp.array([a1, a2])
     
     return a, Eout
 
 
-def accelerateML(E: np.ndarray, wp: float, QM: float):
+def accelerateML(E: cp.ndarray, wp: float, QM: float):
     """
     Compute particle acceleration for ML-predicted electric fields.
 
     Args:
-        E (np.ndarray): Electric field at particle positions.
+        E (cp.ndarray): Electric field at particle positions.
         wp (float): Particle weights.
         QM (float): Charge-to-mass ratio (q/m).
 
     Returns:
-        np.ndarray: Particle accelerations.
+        cp.ndarray: Particle accelerations.
     """
     return E * QM / wp
 
 
-def push(vp: np.ndarray, a: np.ndarray, 
+def push(vp: cp.ndarray, a: cp.ndarray, 
          DT: float, Q: float, 
          QM: float, wp: float,
          it: int):
@@ -71,8 +72,8 @@ def push(vp: np.ndarray, a: np.ndarray,
     Update particle velocities using leapfrog integration and compute kinetic energy.
 
     Args:
-        vp (np.ndarray): Particle velocities.
-        a (np.ndarray): Particle accelerations.
+        vp (cp.ndarray): Particle velocities.
+        a (cp.ndarray): Particle accelerations.
         DT (float): Timestep size.
         Q (float): Particle charge.
         QM (float): Charge-to-mass ratio (q/m).
@@ -80,7 +81,7 @@ def push(vp: np.ndarray, a: np.ndarray,
         it (int): Current timestep index.
 
     Returns:
-        vp_new (np.ndarray): Updated particle velocities.
+        vp_new (cp.ndarray): Updated particle velocities.
         kinetic_energy (float): Kinetic energy after update.
     """
     if it == 0:
@@ -89,22 +90,22 @@ def push(vp: np.ndarray, a: np.ndarray,
         return vp + a * DT, kinetic(vp + a * DT, Q, QM, wp)
 
 
-def move(xp: np.ndarray, vp: np.ndarray,
+def move(xp: cp.ndarray, vp: cp.ndarray,
         wp: float, DT: float, 
         L: float, it: int = None):
     """
     Update particle positions based on velocities with optional source term.
 
     Args:
-        xp (np.ndarray): Particle positions.
-        vp (np.ndarray): Particle velocities.
+        xp (cp.ndarray): Particle positions.
+        vp (cp.ndarray): Particle velocities.
         wp (float): Particle weights.
         DT (float): Timestep size.
         L (float): Domain length.
         it (int, optional): Current timestep index, used for source term.
 
     Returns:
-        xp_new (np.ndarray): Updated particle positions.
+        xp_new (cp.ndarray): Updated particle positions.
         wp_new (float): Updated particle weights if source term applied.
     """
     if wp == 1:
@@ -113,17 +114,17 @@ def move(xp: np.ndarray, vp: np.ndarray,
         return xp + vp * DT, wp + DT * findsource(xp + vp * DT / 2, vp, L, it + 0.5, DT)
 
 
-def toPeriodic(x: np.ndarray, L: float, discrete: bool=False):
+def toPeriodic(x: cp.ndarray, L: float, discrete: bool=False):
     """
     Apply periodic boundary conditions to particle positions.
 
     Args:
-        x (np.ndarray): Particle positions (or indices).
+        x (cp.ndarray): Particle positions (or indices).
         L (float): Domain length.
         discrete (bool, optional): Treat positions as discrete indices if True.
 
     Returns:
-        np.ndarray: Particle positions wrapped into [0, L).
+        cp.ndarray: Particle positions wrapped into [0, L).
     """
     out = (x < 0)
     x[out] = x[out] + L
@@ -134,12 +135,12 @@ def toPeriodic(x: np.ndarray, L: float, discrete: bool=False):
     x[out] = x[out] - L
     return x
 
-def toPeriodicND(x: np.ndarray, L: float, dim :int=2, discrete: bool=False):
+def toPeriodicND(x: cp.ndarray, L: float, dim :int=2, discrete: bool=False):
     for i in range(dim):
         x[:,i] = toPeriodic(x[:,i], L[i], discrete)
     return x
 
-def toPeriodicNDTranspose(x: np.ndarray, L: float, dim :int=2, discrete: bool=False):
+def toPeriodicNDTranspose(x: cp.ndarray, L: float, dim :int=2, discrete: bool=False):
     for i in range(dim):
         x[i] = toPeriodic(x[i], L[i], discrete)
     return x

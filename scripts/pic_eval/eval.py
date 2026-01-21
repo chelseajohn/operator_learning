@@ -28,7 +28,7 @@ parser.add_argument(
 parser.add_argument(
     "--dt", default="0.05", type=float, help="timestep")
 parser.add_argument(
-    "--alpha", default="0.5", type=float, help="pertubation")
+    "--alpha", default="0.05", type=float, help="pertubation")
 parser.add_argument(
     "--Vt", default=1, type=float, help="thermal velocity")
 parser.add_argument(
@@ -64,11 +64,13 @@ device_name = torch.cuda.get_device_name(0) if device == 'cuda' else 'CPU'
 checkpoint = args.checkpoint
 dim = args.dim
 vis = PICVisualizer(args)
+#breakpoint()
 
 if checkpoint is not None:
     fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
     if dim == 1:
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model)
+        #posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
+        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file='/p/project1/pepcexa/muralikrishnan1/operator_learning/PIC1D_electrostatic.h5')
         #phase_spacePred = vis.phase_space(xp=posPred, vp=velPred, wp=wPred, ml_acc=True)
         phase_spacePred = None
     else:
@@ -97,7 +99,7 @@ else:
 #growth_rate = vis.twoStreamIppl(ExRef=ERef, ExPred=EPred)  
 energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EkPred=EkPred, EpRef=EpRef, EpPred=EpPred)
 conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
-landau_decay = vis.landau_decay(phiMax=ERef, phiMaxPred=EPred)
+landau_decay = vis.landau_decay(Ex=ERef, ExPred=EPred)
 
 HEADER = """
 # FNO evaluation for PIC in {dim}D on {device}

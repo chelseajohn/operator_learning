@@ -5,6 +5,7 @@ from collections import OrderedDict
 from statistics import mean
 import torch
 import torch.distributed as dist
+import cupy as cp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 import torch.profiler as tprof
@@ -746,5 +747,6 @@ class FourierNeuralOperator:
                         outp += sliced_inpt
                 inpt = outp
 
-        u1 = outp.cpu().detach().numpy()
+        #u1 = outp.cpu().detach().numpy()
+        u1 = cp.from_dlpack(outp.detach())
         return u1

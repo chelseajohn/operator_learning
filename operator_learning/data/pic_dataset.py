@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+import cupy as cp
 from typing import Tuple, List, Optional
 import torch
 from torch.utils.data import Dataset
@@ -122,13 +123,13 @@ class PICDataset(Dataset):
         print_rank0(f" -- outScaling : {infos['outScaling'][()]:1.2g}")
   
      
-def normalize_per_sample(data: np.ndarray) -> np.ndarray:
+def normalize_per_sample(data: cp.ndarray) -> cp.ndarray:
     """
     Normalize each sample independently to the [0, 1] range.
     """
     data_min = data.min(axis=1, keepdims=True)
     data_max = data.max(axis=1, keepdims=True)
-    denom = np.where(data_max > data_min, data_max - data_min, 1.0)
+    denom = cp.where(data_max > data_min, data_max - data_min, 1.0)
     return (data - data_min) / denom
 
 

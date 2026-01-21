@@ -76,12 +76,12 @@ eval:
   dim: 1
   kc : 0.5
   NG : 32
-  T: 10
+  T: 20
   dt: 0.05
   Vt: 1
   nParticle: 100000
   Qm : -1
-  alpha: 0.5
+  alpha: 0.05
 
 profile:
   enableProfiler: false

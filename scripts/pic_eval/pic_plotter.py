@@ -33,11 +33,13 @@ class PICVisualizer:
         self.T = args.T
         self.VT = args.Vt
         self.NT = int(self.T/self.DT) 
-        self.times = cp.linspace(0, self.NT * self.DT, self.NT)   # number of time steps
+        self.times = np.linspace(0, self.NT * self.DT, self.NT)   # number of time steps
         self.dim = args.dim
-        self.k = cp.array([args.kc]*self.dim)
-        self.L = 2*cp.pi/self.k                                   # Length of the container  
-        self.dx = cp.array(self.L / self.NG)                      # cell length        
+        self.k = np.array([args.kc]*self.dim)
+        self.L = 2*np.pi/self.k                                   # Length of the container  
+        self.dx = np.array(self.L / self.NG) # cell length 
+        self.Ln = cp.asarray(self.L)
+        self.dxn = cp.asarray(self.dx)
         self.alpha = args.alpha
         
         if self.dim == 1:                                                             
@@ -64,7 +66,7 @@ class PICVisualizer:
         filename = f"{name}_run{self.args.runId}.{self.args.imgExt}"
         return filename
 
-    def pic1D(self, ml_acc: bool = False, model = None):
+    def pic1D(self, ml_acc: bool = False, model = None, data_file = None):
         """
         Run a 1D Particle-In-Cell (PIC) simulation.
 
@@ -92,16 +94,24 @@ class PICVisualizer:
             - Computes kinetic, potential, and field energies, as well as momentum conservation.
         """
         # Storage arrays
-        pos = np.zeros([self.NT, self.N], dtype=np.float32)
+        pos = cp.zeros([self.NT, self.N], dtype=cp.float32)
         Eout = cp.zeros([self.NT, self.N], dtype=cp.float32)
-        p = np.arange(self.N, dtype=int)
+        p = cp.arange(self.N, dtype=int)
         # Build Q-charge  array
         charge = cp.full(pos.shape[1], -4 * cp.pi, dtype=cp.float32)
 
         # Initial particle positions and velocities
-        xt = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
+        xp = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
+        xp = cp.asarray(xp)
         vp = cp.random.randn(self.N)
         wp = 1.0
+
+        # Mean and Std of training output data
+        if data_file is not None:
+            data = h5py.File(data_file, 'r')
+            data_output_mean = data['infos']['output_mean'][()]
+            data_output_std = data['infos']['output_std'][()]
+
 
         # Energy and momentum tracking
         Ek, Ep, Exp, E, momentum = [], [], [], [], []
@@ -109,10 +119,12 @@ class PICVisualizer:
         times_acc = []
      
 
+        print('Before entering time loop')
         for it in range(self.NT):
+            print(it)
             # Enforce periodic boundary conditions
-            xp = toPeriodic(xt, self.L)
-
+            xp = toPeriodic(xp, self.Ln)
+            #breakpoint()
             # Store particle positions
             pos[it, :] = xp.astype(cp.float32)
         
@@ -122,17 +134,23 @@ class PICVisualizer:
                 # Stack pos and rho
                 features = cp.stack([pos[it, :], charge], axis=0)
                 inputs = features[None, :, :]    # [batch=1, particles, features]
+                inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
+                #out = model(inputs).flatten()
+                #breakpoint()
                 Eout[it, :] = model(inputs).flatten()
-                a = accelerateML(E=Eout, wp=wp, QM=self.QM)
+                Eout[it,:] = Eout[it,:] * data_output_std + data_output_mean
+                #breakpoint()
+                a = accelerateML(E=Eout[it,:].squeeze(), wp=wp, QM=self.QM)
+                #breakpoint()
                 times_acc.append(time.time() - t0)
             else:
                 t0 = time.time()
                 # Interpolation: particle -> grid
-                M = interpMatrix(XP=xp, wp=1, DX=self.dx, N=self.N, NG=self.NG, p=p, L=self.L, dim=self.dim)
-                rho = interpolate(M=M, DX=self.dx, L=self.L, NG=self.NG, Q=self.Q, rho_back=self.rho_back, dim=self.dim)
+                M = interpMatrix(XP=xp, wp=1, DX=self.dxn, N=self.N, NG=self.NG, p=p, L=self.Ln, dim=self.dim)
+                rho = interpolate(M=M, DX=self.dxn, L=self.Ln, NG=self.NG, Q=self.Q, rho_back=self.rho_back, dim=self.dim)
 
                 # Compute fields
-                phi, Eg = field(rho=rho, L=self.L, dim=self.dim)
+                phi, Eg = field(rho=rho, L=self.Ln, dim=self.dim)
                 
                 a, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
                 times_acc.append(time.time() - t0)
@@ -140,22 +158,24 @@ class PICVisualizer:
             # Update velocities and kinetic energy
             vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
 
+            #breakpoint()
             # Update positions and weights
-            xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.L, it=it)
+            xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.Ln, it=it)
+            #breakpoint()
 
             # Electric field energy
-            Egp = cp.sum(Eout[it, :] ** 2) * self.L / self.N
+            Egp = cp.sum(Eout[it, :] ** 2) * self.Ln / self.N
 
             # Compute potential energy
             # Epotential = potential(rho=rho, phi=phi, dx=self.dx, dim=self.dim)
             Epotential = 0.5 * Egp
             
             # Append energies and momentum
-            Ek.append(kinetic)
-            Ep.append(Epotential)
-            E.append(kinetic + Epotential)
-            Exp.append(Egp)
-            momentum.append(cp.abs(cp.sum(self.Q * vp / self.QM)))
+            Ek.append(kinetic.get())
+            Ep.append(Epotential.get())
+            E.append((kinetic + Epotential).get())
+            Exp.append(Egp.get())
+            momentum.append((cp.abs(cp.sum(self.Q * vp / self.QM))).get())
 
         time_acc_mean = np.round(np.mean(times_acc)*(10**6),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} microsec")
@@ -164,15 +184,17 @@ class PICVisualizer:
 
     def pic2D(self, ml_acc: bool = False, model = None, data_file = None):
         # Storage arrays
-        pos = np.zeros([self.NT, self.N, 2], dtype=np.float32)
-        Eout = np.zeros([self.NT, self.N, 2], dtype=np.float32)
-        p = np.arange(self.N, dtype=int)
+        pos = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
+        Eout = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
+        p = cp.arange(self.N, dtype=int)
         # Build Q-charge  array
-        charge = np.full((1, 1, pos.shape[1]), self.Q*self.N, dtype=np.float32)
+        charge = cp.full((1, 1, pos.shape[1]), self.Q*self.N, dtype=cp.float32)
 
         # Initial particle positions and velocities
         xpn, vpn = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
-        xp, vp = np.transpose(xpn), np.transpose(vpn)
+        xpc, vpc = np.transpose(xpn), np.transpose(vpn)
+        xp, vp = cp.asarray(xpc), cp.asarray(vpc)
+        xpn, vpn = cp.asarray(xpn), cp.asarray(vpn)
         wp = 1.0
 
         # Mean and Std of training output data
@@ -194,54 +216,56 @@ class PICVisualizer:
                 # Enforce periodic boundary conditions
                 xp = toPeriodicND(xp, self.L, dim=self.dim) # [particle, channel]
                 # Stack pos and charge
-                xt = np.transpose(xp)  # [channel, particle]
+                xt = cp.transpose(xp)  # [channel, particle]
                 positions = xt[None, :, :]
                 positions[:, 0, :] = normalize_per_sample(positions[:, 0, :])
                 positions[:, 1, :] = normalize_per_sample(positions[:, 1, :])
-                inputs = np.concatenate([positions, charge], axis=0) # [batch=1, channel=3, particles]
+                inputs = cp.concatenate([positions, charge], axis=1) # [batch=1, channel=3, particles]
                 prediction = model(inputs) # [1, channel=2, particle]
-                Efieldparticle = np.swapaxes(prediction, 1, 2).squeeze()  # [particles, channel=2]
+                Efieldparticle = cp.swapaxes(prediction, 1, 2).squeeze()  # [particles, channel=2]
                 Efieldparticle[:,0] = Efieldparticle[:,0] * data_output_std[0] + data_output_mean[0]
                 Efieldparticle[:,1] = Efieldparticle[:,1] * data_output_std[1] + data_output_mean[1]
-                Efieldparticle[:,0] = Efieldparticle[:,0] - ((1/N) * np.sum(Efieldparticle[:,0]))
-                Efieldparticle[:,1] = Efieldparticle[:,1] - ((1/N) * np.sum(Efieldparticle[:,1]))
+                Efieldparticle[:,0] = Efieldparticle[:,0] - ((1/N) * cp.sum(Efieldparticle[:,0]))
+                Efieldparticle[:,1] = Efieldparticle[:,1] - ((1/N) * cp.sum(Efieldparticle[:,1]))
                 a = accelerateML(E=Efieldparticle, wp=wp, QM=self.QM)
                 times_acc.append(time.time() - t0)
                 vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
+                # Update positions and weights
+                xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.L, it=it)
             else:
                 t0 = time.time()
-                xp = toPeriodicNDTranspose(xpn, self.L, dim=self.dim)
+                xpn = toPeriodicNDTranspose(xpn, self.L, dim=self.dim)
                 # Interpolation: particle -> grid
-                M = interpMatrix(XP=xp, wp=1, DX=self.dx, N=self.N, NG=self.NG, p=p, L=self.L, dim=self.dim)
+                M = interpMatrix(XP=xpn, wp=1, DX=self.dx, N=self.N, NG=self.NG, p=p, L=self.L, dim=self.dim)
                 rho = interpolate(M=M, DX=self.dx, L=self.L, NG=self.NG, Q=self.Q, rho_back=self.rho_back, dim=self.dim)
 
                 # Compute fields
                 phi, Eg = field(rho=rho, L=self.L, dim=self.dim)
-                pos[it, :, :] = np.transpose(xpn.astype(np.float32))
-                a, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
+                pos[it, :, :] = cp.transpose(xpn.astype(cp.float32))
+                an, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
                 Efieldparticle = Eout[it,:,:].squeeze()
                 times_acc.append(time.time() - t0)
                 # Update velocities and kinetic energy
-                vp, kinetic = push(vp=vpn, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
+                vpn, kineticn = push(vp=vpn, a=an, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
+                # Update positions and weights
+                xpn, wp = move(xp=xpn, vp=vpn, wp=wp, DT=self.DT, L=self.L, it=it)
 
 
-            # Update positions and weights
-            xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.L, it=it)
 
             # Electric field energy
-            Egp = np.sum(Efieldparticle[:,1]**2) * (self.L[0] * self.L[1]) / self.N
+            Egp = cp.sum(Efieldparticle[:,1]**2) * (self.L[0] * self.L[1]) / self.N
    
             # Compute potential energy
-            Epotential = np.sum(Efieldparticle[:,0]**2 + Efieldparticle[:,1]**2) * 0.5 * (self.L[0] * self.L[1]) / self.N
+            Epotential = cp.sum(Efieldparticle[:,0]**2 + Efieldparticle[:,1]**2) * 0.5 * (self.L[0] * self.L[1]) / self.N
             
             # Append energies and momentum
-            Ek.append(kinetic)
-            Ep.append(Epotential)
-            E.append(kinetic + Epotential)
-            Exp.append(Egp)
-            momx = np.sum(self.Q * vp[:,0] / self.QM)
-            momy = np.sum(self.Q * vp[:,1] / self.QM)
-            momentum.append((np.sqrt(momx**2 + momy**2)))
+            Ek.append(kinetic.get())
+            Ep.append(Epotential.get())
+            E.append((kinetic + Epotential).get())
+            Exp.append(Egp.get())
+            momx = cp.sum(self.Q * vp[:,0] / self.QM)
+            momy = cp.sum(self.Q * vp[:,1] / self.QM)
+            momentum.append((cp.sqrt(momx**2 + momy**2)).get())
 
         time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
@@ -340,16 +364,32 @@ class PICVisualizer:
         plt.clf()
         return filename
 
-    def landau_decay(self, phiMax, phiMaxPred=None):
+    def landau_decay(self, Ex, ExPred=None, label='weak'):
         a = np.linspace(0, (self.NT - 1) * self.DT, self.NT)
-        pp = period(self.k[0])
-        b = phiMax[int(pp // (2 * self.DT))] * np.exp((a[0:2000] - pp / 2) * decayRate(self.k[0]))
+        #pp = period(self.k[0])
+        #b = phiMax[int(pp // (2 * self.DT))] * np.exp((a[0:2000] - pp / 2) * decayRate(self.k[0]))
         plt.figure()
         filename = self._img_path("landau_decay_rateRef")
-        plt.plot(a, phiMax, label=r'$\int ERef_x^2 dV$', color='blue')
-        plt.plot(a[0:2000], b, label='Predicted Decay Rate', color='green', linestyle="--")
-        if phiMaxPred is not None:
-            plt.plot(a, phiMaxPred, label=r'$\int EPred_x^2 dV$', color='orange')
+        plt.plot(a, Ex, label=r'$\int ERef_x^2 dV$', color='blue')
+        #plt.plot(a[0:2000], b, label='Predicted Decay Rate', color='green', linestyle="--")
+        if(label == 'weak'):
+            gamma1 = -0.3066
+        else:
+            gamma1 = -0.562
+            gamma2 = 0.168
+            ind2 = np.argmin(np.abs(a - 20.592))
+            theo_ref2 = np.exp(gamma2 * a)
+            theo_ref2 = (Ex[ind2]/theo_ref2[ind2])*theo_ref2
+
+
+        ind1 = np.argmin(np.abs(a - 2.5))
+        theo_ref1 = np.exp(gamma1 * a)
+        theo_ref1 = (Ex[ind1]/theo_ref1[ind1])*theo_ref1
+        plt.plot(a, theo_ref1, label='Predicted Decay Rate', color='seagreen')
+        if(label == 'strong'):
+            plt.plot(a, theo_ref2, label='Predicted Growth Rate', color='red')
+        if ExPred is not None:
+            plt.plot(a, ExPred, label=r'$\int EPred_x^2 dV$', color='orange')
         plt.title(f'Landau Damping Decay Rate (k={self.k})')
         plt.yscale('log')
         plt.ylabel(r'$\int E_x^2 dV$')
