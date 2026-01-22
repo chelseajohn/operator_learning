@@ -13,12 +13,12 @@ class PICDataset(Dataset):
         Dataset reader and getitem for PIC data
 
         Args:
-            dataFile (hdf5): data file 
-            
+            dataFile (hdf5): data file
+
         """
-        
-        self.dataFile = dataFile  
-        self._file = None 
+
+        self.dataFile = dataFile
+        self._file = None
         self.dataClass = kwargs.get('dataClass', 'pic')
 
         if self.nDim == 2:
@@ -32,14 +32,14 @@ class PICDataset(Dataset):
     def __getstate__(self):
         state = self.__dict__.copy()
         state['_file'] = None  # remove the h5py file before pickling
-        return state   
-    
+        return state
+
     @property
     def file(self):
         if self._file is None:
             self._file = h5py.File(self.dataFile, 'r')
         return self._file
-    
+
     @property
     def inputs(self):
         return self.file['inputs']
@@ -59,7 +59,7 @@ class PICDataset(Dataset):
     @property
     def outScaling(self):
         return float(self.infos['outScaling'][()])
-     
+
     def __len__(self):
         assert len(self.inputs) == len(self.outputs), \
             f"different sample number for inputs and outputs ({len(self.inputs)},{len(self.outputs)})"
@@ -82,7 +82,7 @@ class PICDataset(Dataset):
     @property
     def infos(self):
         return self.file["infos"]
-    
+
     @property
     def output_prop(self):
         mean = self.infos['output_mean'][()]
@@ -121,15 +121,16 @@ class PICDataset(Dataset):
         print_rank0(f" -- outputStd : {infos['output_std'][()]}")
         print_rank0(f" -- outType : {self._decode(infos['outType'][()])}")
         print_rank0(f" -- outScaling : {infos['outScaling'][()]:1.2g}")
-  
-     
+
+
 def normalize_per_sample(data: cp.ndarray) -> cp.ndarray:
     """
     Normalize each sample independently to the [0, 1] range.
     """
     data_min = data.min(axis=1, keepdims=True)
     data_max = data.max(axis=1, keepdims=True)
-    denom = cp.where(data_max > data_min, data_max - data_min, 1.0)
+    #denom = cp.where(data_max > data_min, data_max - data_min, 1.0)
+    denom = np.where(data_max > data_min, data_max - data_min, 1.0)
     return (data - data_min) / denom
 
 
@@ -165,7 +166,7 @@ def load_h5Dataset(file_path: str, keys: List[str], iEnd: Optional[int] = None, 
 
 def createDatasetFromPIC(picFile: str,
                          dataFile: str,
-                         iEnd: Optional[int] = None, 
+                         iEnd: Optional[int] = None,
                          step: int = 1,
                          nDim: int = 1,
                          outType: str = 'solution',
@@ -180,7 +181,7 @@ def createDatasetFromPIC(picFile: str,
     outputs_list = load_h5Dataset(picFile, output_keys, iEnd, step)
 
 
-    inp = np.concatenate(inputs_list, axis=0) # 1D: (timestep, position), 2D: (timestep, position, dim) 
+    inp = np.concatenate(inputs_list, axis=0) # 1D: (timestep, position), 2D: (timestep, position, dim)
     outp = np.concatenate(outputs_list, axis=0)  # 1D: (timstep, electricField), 2D: (timestep, electricField, dim)
     if nDim == 1:
         outputs = outp[:, np.newaxis, :]  # timestep, channel=1, electricField)
@@ -198,7 +199,7 @@ def createDatasetFromPIC(picFile: str,
     # Stack Q as extra channel
     # shape: (timestep, dim+1, features); features: position, charge
     if nDim == 1:
-        inputs = np.stack([inp, Q], axis=1)  
+        inputs = np.stack([inp, Q], axis=1)
     else:
         Q_new = Q[:, np.newaxis, :] # (timestep, 1, position)
         inputs = np.concatenate((inp, Q_new), axis=1)

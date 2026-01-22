@@ -1,5 +1,5 @@
 simu:
-  picFile: electrostatic_plasma1D.h5
+  picFile: /p/project1/pepcexa/muralikrishnan1/operator_learning/1D_PIC_data_22_01_26.h5
   nDim: 1
 
 sample:
@@ -15,7 +15,7 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: /p/project1/pepcexa/muralikrishnan1/operator_learning/PIC1D_electrostatic.h5
+  dataFile: /p/project1/pepcexa/muralikrishnan1/operator_learning/PIC1D_electrostatic_22_01_26.h5
   trainRatio: 0.8
   batchSize: 20        # Global Batch size
   sampling_mode: None  # [fixed, ordered, random]
@@ -63,7 +63,7 @@ parallel_strategy:
   gpus_per_node: 4
 
 train:
-  trainDir: PIC1D
+  trainDir: PIC1D_22_01_26
   epochs: 100                     # nEpochs
   checkpoint: None
   saveInterval: 50
