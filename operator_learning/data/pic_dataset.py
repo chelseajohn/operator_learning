@@ -163,6 +163,12 @@ def load_h5Dataset(file_path: str, keys: List[str], iEnd: Optional[int] = None, 
             datasets.append(np.array(data, dtype=np.float32))
     return datasets
 
+def percentage_difference(truth, test):
+    """
+    Compute relative errors
+    """
+    difference = torch.mean(torch.abs(truth - test))/torch.mean(torch.abs(truth)) * 100
+    return difference.item()
 
 def createDatasetFromPIC(picFile: str,
                          dataFile: str,

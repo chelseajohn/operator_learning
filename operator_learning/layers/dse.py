@@ -48,7 +48,8 @@ class SpectralConv_dse(nn.Module):
     
     def compl_mul(self, input, weights):
         """
-        [batch, dv, nx, ny], [dv, dv, nx, ny] -> [batch, dv, nx, ny]
+        RBC2D: [nbatch, dv, nx, ny], [dv, dv, nx, ny] -> [nbatch, dv, nx, ny]
+        PIC1D/2D: [nbatch, dv, nparticle], [dv, dv, kX]
         Einsum string depends on dim:
         - 1D: "bik,iok->bok"
         - 2D: "bixy,ioxy->boxy"
@@ -106,6 +107,7 @@ class SpectralConv_dse(nn.Module):
                 
         # Return to physical space
         x = self.transformer.inverse(out_ft)
+        x = x / x.size(-1)
 
         if self.bias is not None:
             x = x + self.bias
@@ -134,11 +136,13 @@ class DSELayer(nn.Module):
         self.conv = SpectralConv_dse(dv, transformer, kX, kY, dataClass, bias, dim, use_complex_amp)
         if dataClass == 'pic':
             dim = 1 # same execution as 1D since y-cord is a channel
-        #self.W = GridLinear(
+
+        # self.W = GridLinear(
         #                inSize=dv, outSize=dv, hiddenSize=None,
         #                bias=bias, n_layers=1, non_linearity=self.sigma,
         #                n_dims=dim, 
         #                )
+
         self.W = MLP( mode='channel',
                         n_dims=1,
                         n_layers=1,
@@ -150,7 +154,10 @@ class DSELayer(nn.Module):
         
 
     def forward(self, x):
-        """ x[nBatch, dv, nX, nY] -> [nBatch, dv, nX, nY] """
+        """
+        RBC2D: x[nBatch, dv, nX, nY] -> [nBatch, dv, nX, nY]
+        PIC1D/2D: x[nBatch, dv, nParticle] -> x[nBatch, dv, nParticle]
+        """
         v = self.conv(x)
         w = self.W(x)
         o = self.sigma(v+w)

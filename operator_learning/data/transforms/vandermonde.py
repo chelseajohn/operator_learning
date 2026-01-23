@@ -36,23 +36,25 @@ class VandermondeTransform:
     def make_1Dmatrix(self, x_data):
         """
         Generates Vandermonde 1D matrices for forward and inverse transforms.
+        PIC1D/2D: x_data[nBatch, nparticle], forward_mat[nBatch, kX, nparticle]
         """
         with torch.no_grad():
-            # x_data: [B, particle], V: [B, kX, particle]
             nParticle = x_data.shape[-1]
 
-            if self.dataClass == 'rbc':
-                xPos = torch.tensor(self.dataset.grid[0], dtype=self.dtype, device=self.device).repeat(x_data.shape[0], 1)
-            else:
+            if self.dataClass == 'pic':
                 xPos = x_data.real
 
             # scaling btw 0 and 2*pi
             xPos = ((xPos - xPos.min()) / xPos.max()) * 2 * np.pi
 
-            forward_mat = torch.exp(-1j * ((self._X.to(xPos.dtype) - int(self.kX/2))* xPos[:, None, :])) # [1, kX, 1] x [B, 1, nX]
-            
-            norm = 1.0 / torch.sqrt(torch.tensor(nParticle, dtype=torch.int, device=self.device))
-            forward_mat.mul_(norm)
+            forward_mat = torch.zeros([x_data.shape[0], self.kX, nParticle], dtype=self.dtype, device=self.device)
+            for row in range(self.kX):
+                forward_mat[:, row, :] = torch.exp(-1j * (row - int(self.kX/2))* xPos[:, :])
+
+            # forward_mat = torch.exp(-1j * ((self._X.to(xPos.dtype) - int(self.kX/2))* xPos[:, None, :])) # [1, kX, 1] x [nBatch, 1, nparticle]
+            # norm = 1.0 / torch.sqrt(torch.tensor(nParticle, dtype=torch.int, device=self.device))
+            # forward_mat.mul_(norm)
+
             self.forward_mat = forward_mat.to(x_data.dtype)
 
         return self.forward_mat
@@ -60,13 +62,10 @@ class VandermondeTransform:
     def make_2Dmatrix(self, x_data, y_data):
         """
         Generates Vandermonde 2D matrices for forward and inverse transforms.
+        PIC2D: x_data[nBatch, nparticle], y_data[nBatch, nparticle], forward_mat[nBatch, m, nparticle]
         """
         with torch.no_grad():
-            # x_data: [B, particle], y_data: [B, particle] 
-            if self.dataClass == 'rbc':
-                xPos = torch.tensor(self.dataset.grid[0], dtype=self.dtype, device=self.device).repeat(x_data.shape[0], 1)
-                yPos = torch.tensor(self.dataset.grid[1], dtype=self.dtype, device=self.device).repeat(y_data.shape[0], 1)
-            else:
+            if self.dataClass == 'pic':
                 xPos = x_data.real
                 yPos = y_data.real
 
@@ -78,45 +77,48 @@ class VandermondeTransform:
             X_mat = torch.matmul(self._X.to(xPos.dtype), xPos[:,None,:]).repeat(1, (self.kY*2-1), 1)
             Y_mat = torch.matmul(self._Y.to(yPos.dtype), yPos[:,None,:]).repeat(1, 1, self.kX*2).reshape(yPos.shape[0], m, yPos.shape[-1]) 
 
-            forward_mat = ((torch.exp(-1j* (X_mat+Y_mat))/ xPos.shape[-1])) # [B, m, particle]
+            forward_mat = ((torch.exp(-1j* (X_mat+Y_mat))/ xPos.shape[-1])) 
             self.forward_mat = forward_mat.to(x_data.dtype)
 
         return self.forward_mat
 
     def forward(self, data):
-        """Computes the forward DSE transform."""
+        """
+        Computes the forward DSE transform.
+        PIC1D/2D: data[nBatch, channel, nparticle], V[nBatch, nparticle, kX or m]
+        data_fwd[nBatch, channel, kX or m]
+        """
 
         with torch.no_grad():
             if data.device != self.device:
                 data = data.to(self.device)
 
             if self.dim == 1:
-                V = self.make_1Dmatrix(x_data=data[:, 0, :]) # [B, kX, particle]
+                V = self.make_1Dmatrix(x_data=data[:, 0, :]) # [nBatch, kX, nparticle]
             else:
-                V = self.make_2Dmatrix(x_data=data[:,0,:], y_data=data[:,1,:])  # [B, m, particle]
+                V = self.make_2Dmatrix(x_data=data[:,0,:], y_data=data[:,1,:])  # [nBatch, m, nparticle]
             
             # torch.bmm does not support complexHalf
-            # 1D: [B, C, particle] x [B, particle, kX], 2D: [B, C, particle] x [B, particle, m]
             if data.dtype == torch.complex32:
                 data_fwd = einsum_complexhalf('bcp,bpk->bck', data, V.permute(0,2,1))
             else:
-                data_fwd = torch.bmm(data, V.permute(0,2,1))  
+                # data_fwd = torch.bmm(data, V.permute(0,2,1))  
+                data_fwd = torch.bmm(data, V)  
             
         return data_fwd
         
     def inverse(self, data):
-        """Computes the inverse Fourier transform."""
+        """
+        Computes the inverse Fourier transform.
+        PIC1D/2D: data[nBatch, channel, kX or m], Vc[nBatch, kX or m, nparticle]
+        data_inv[nBatch, channel, nparticle]
+        """
         
         with torch.no_grad():
-            if self.dim == 1:
-                # Vc: [B, kX, particle]
-                Vc =  torch.conj(self.forward_mat)
-            else:
-                # Vc: [B, m, particle] 
-                Vc = torch.conj(self.forward_mat) 
-                
+
+            Vc =  torch.conj(self.forward_mat).permute(0,2,1)
+            
             # torch.matmul does not support complexHalf
-            # 1D data: [B, C, kX], 2D data: [B, C, m]
             if data.dtype == torch.complex32:
                 data_inv = einsum_complexhalf('bck,bkp->bcp', data, Vc)
             else:
