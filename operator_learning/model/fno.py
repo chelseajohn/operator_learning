@@ -7,9 +7,9 @@ import pandas as pd
 import torch.nn.functional
 from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
-from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer
+from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer, NUFFTLayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
-
+from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
 
 class FNOLayer(nn.Module):
 
@@ -49,18 +49,26 @@ class FNOLayer(nn.Module):
                                     hidden_channels=2*dv
                                 )
 
-        self.W = GridLinear(inSize=dv,
-                                outSize=dv,
-                                hiddenSize=None,
-                                bias=bias,
-                                n_layers=1,
-                                n_dims=n_dims,
-                                non_linearity=self.sigma
-                                )
+        # self.W = GridLinear(inSize=dv,
+        #                         outSize=dv,
+        #                         hiddenSize=None,
+        #                         bias=bias,
+        #                         n_layers=1,
+        #                         n_dims=n_dims,
+        #                         non_linearity=self.sigma
+        #                         )
+        self.W = MLP( mode='channel',
+                    n_dims=1,
+                    n_layers=1,
+                    in_channels=dv,
+                    out_channels=dv,
+                    hidden_channels=None,
+                    )
 
 
     def forward(self, x):
-        """ x[nBatch, dv, nX, nY, (nZ)] -> [nBatch, dv, nX, nY, (nZ)] """
+        """RBC2D/3D:
+          x[batchsize, dv, nX, nY, (nZ)] -> [batchsize, dv, nX, nY, (nZ)] """
 
         v = self.conv(x)                # Convolution
         if self.use_postfnochannel_mlp: # MLP
@@ -93,16 +101,11 @@ class FNO(nn.Module):
                  use_skip_connection=False, 
                  skip_type='linear',
                  use_dse=False,
-                 get_subdomain_output=False,
-                 iXBeg=0,
-                 iYBeg=0,
-                 iZBeg=0,
-                 iXEnd=None,
-                 iYEnd=None,
-                 iZEnd=None,
-                 dataset=None,
-                 dataClass='pic',
+                 use_toeplitz=False,
+                 use_kb=False,
+                 dataset=None,dataClass='pic',
                  use_complex_amp=False,
+                 matrix_free=False,
                  device='cpu',
                  **kwargs
                  ):
@@ -111,39 +114,48 @@ class FNO(nn.Module):
      
         # self.use_postfnochannel_mlp = use_postfnochannel_mlp
         self.n_dims = n_dims
+        self.device = device
+        self.dv = dv
+        self.kX = kX
+        self.kY = kY
+        self.kZ = kZ
 
         # DSE not implemented for 3D
         self.use_dse = use_dse
+        # Toeplitz implemented only for PIC1D
+        self.use_toeplitz = use_toeplitz
+        # KB implemented only for PIC1D and PIC2D
+        self.use_kb = use_kb 
+        assert sum([self.use_dse, self.use_toeplitz, self.use_kb]) <= 1, \
+            "Exactly one of use_dse, use_toeplitz, or use_kb must be True."
+
         self.dataClass = dataClass
         self.dataset = dataset if dataClass == 'rbc' else None
-        
+        self.data_type = torch.float16 if use_complex_amp and self.training else torch.float32
+
         if use_dse:
-            data_type = torch.float16 if use_complex_amp and self.training else torch.float32
-            transformer = VandermondeTransform(device=device, kX=kX, kY=kY, dataset=dataset, \
-                                               dataClass=dataClass, dim=n_dims, \
-                                               dtype=data_type)
-        else:
-           transformer = None
-   
-        self.P = MLP( mode='linear',
-                        n_dims=n_dims,
-                        n_layers=1,
-                        in_channels=da,
-                        out_channels=dv,
-                        hidden_channels=round(dv*channel_mlp_expansion),
-                    )
-        self.Q = MLP( mode='linear',
-                        n_dims=n_dims,
-                        n_layers=2,
-                        in_channels=dv,
-                        out_channels=du,
-                        hidden_channels=round(dv*channel_mlp_expansion),
-                    )
-       
-        if transformer is not None:
             self.layers = nn.ModuleList(
-                [DSELayer(dv=dv, transformer=transformer,
+                [DSELayer(dv=dv,
                           kX=kX, kY=kY, dataClass=dataClass,
+                          non_linearity=non_linearity,
+                          bias=bias,
+                          dim=n_dims,
+                          use_complex_amp=use_complex_amp,
+                         )
+                 for _ in range(n_layers)])
+        elif use_toeplitz:
+            self.layers = nn.ModuleList(
+                [NUFFTLayer(dv=dv, 
+                          kX=kX, dataClass=dataClass,
+                          non_linearity=non_linearity,
+                          bias=bias,
+                          dim=n_dims,
+                          use_complex_amp=use_complex_amp)
+                 for _ in range(n_layers)])
+        elif use_kb:
+            self.layers = nn.ModuleList(
+                [NUFFTLayer(dv=dv,
+                          kX=kX, dataClass=dataClass,
                           non_linearity=non_linearity,
                           bias=bias,
                           dim=n_dims,
@@ -160,47 +172,65 @@ class FNO(nn.Module):
                           skip_type=skip_type,
                           use_complex_amp=use_complex_amp)
                  for _ in range(n_layers)])
-
-
+   
+        self.P = MLP( mode='linear',
+                        n_dims=n_dims,
+                        n_layers=1,
+                        in_channels=da,
+                        out_channels=dv,
+                        hidden_channels=round(dv*channel_mlp_expansion),
+                    )
+        self.Q = MLP( mode='linear',
+                        n_dims=n_dims,
+                        n_layers=2,
+                        in_channels=dv,
+                        out_channels=du,
+                        hidden_channels=round(dv*channel_mlp_expansion),
+                    )
+       
         self.memory = CudaMemoryDebugger(print_mem=True)
-        self.get_subdomain_output = get_subdomain_output
-        if self.get_subdomain_output:
-            self.iXBeg = iXBeg
-            self.iXEnd = iXEnd
-            self.iYBeg = iYBeg
-            self.iYEnd = iYEnd
-            if self.n_dims == 3:
-                self.iZBeg = iZBeg
-                self.iZEnd = iZEnd
+ 
 
     def forward(self, x):
-        """ x[nBatch, da, nX, nY, nZ] -> [nBatch, du, nX, nY, nZ] 
-            if use_subdomain_output:
-                x[nBatch, da, nX, nY, nZ] -> [nBatch, du, iXEnd-iXBeg, iYEnd-iYBeg, iZEnd-iZBeg]
+        """
+        RBC2D/3D:
+            x[batchsize, da, nX, nY, (nZ)] -> [batchsize, du, nX, nY, (nZ)] 
+        PIC1D/2D:
+            x[batchsize, da, nParticle] -> [batchsize, du, nParticle]
         """
 
-       
-        #print_rank0(f'Shape of Px: {x.shape}')
+        if self.use_dse:
+            if self.n_dims == 1:
+                transform_coeff = VandermondeTransform(positions=x[:,0,:], 
+                                                kX=self.kX, 
+                                                kY=self.kY,
+                                                dim=self.n_dims,
+                                                device=self.device,
+                                                dtype=self.data_type)
+        if self.use_toeplitz:
+            transform_coeff = NUFFTTransform(device=self.device, dataClass='pic', transform='toeplitz', 
+                                       dv=self.dv, kX=self.kX,
+                                       kY=self.kY, dim=self.n_dims, 
+                                       dtype=self.data_type)
+        
+        if self.use_kb:
+            transform_coeff = NUFFTTransform(device=self.device, dataClass='pic', transform='kb', 
+                                       dv=self.dv, kX=self.kX,
+                                       kY=self.kY, dim=self.n_dims, 
+                                       dtype=self.data_type)
+
+
         x = x.permute(0,2,1)
         x = self.P(x)
         x = x.permute(0,2,1)
-        # print_rank0(f'Shape of Px: {x.shape}')
 
         for index,layer in enumerate(self.layers):
-            x = layer(x)
+            x = layer(x, transform_coeff)
           
-        # to get only a subdomain output inference
-        if self.get_subdomain_output:
-            print_rank0(f'Filtering to x-subdomain {self.iXBeg,self.iXEnd} & y-subdomain {self.iYBeg,self.iYEnd}')
-            x = x[:, :, self.iXBeg:self.iXEnd, self.iYBeg:self.iYEnd]
-            if self.n_dims == 3:
-                print_rank0(f' & z-subdomain {self.iZBeg, self.iZEnd} ')
-                x = x [:, :, :, :, self.iZBeg: self.iZEnd]
-
         x = x.permute(0,2,1)
         x = self.Q(x)
         x = x.permute(0,2,1)
-        # print_rank0(f'Shape of Qx: {x.shape}')
+ 
 
         return x
 
@@ -223,12 +253,12 @@ if __name__ == "__main__":
     from operator_learning.utils.misc import enable_tf32_only_on_a100
     enable_tf32_only_on_a100()
     # Quick script testing
-    model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True)
-    model2D = FNO(da=3, dv=6, du=2, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True)
+    model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True, use_kb=False, use_toeplitz=False)
+    model2D = FNO(da=3, dv=6, du=2, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True, use_kb=False, use_toeplitz=False)
     model3D = FNO(da=5, dv=10, du=5, n_layers=4, kX=12, kY=12, kZ=12, n_dims=3)
-    uIn_1d = torch.rand(5, 2, 100000)
-    uIn_2d = torch.rand(5, 3, 100000)
+    uIn_1d = torch.rand(5, 2, 100)
+    uIn_2d = torch.rand(5, 3, 100)
     uIn_3d = torch.rand(5, 5, 64, 64, 32)
-    print_rank0(f"FNO1D Model Output:{model1D(uIn_1d).shape}")
-    print_rank0(f"FNO2D Model Output:{model2D(uIn_2d).shape}")
+    print_rank0(f"FNO1D Model Output:{model1D(uIn_1d).shape}, FNOModel: {model1D}")
+    print_rank0(f"FNO2D Model Output:{model2D(uIn_2d).shape}, FNOModel: {model2D}")
     print_rank0(f"FNO3D Model Output:{model3D(uIn_3d).shape}")

@@ -1,5 +1,6 @@
 import os
 import time
+import numpy as np
 from pathlib import Path
 from collections import OrderedDict
 from statistics import mean
@@ -290,6 +291,7 @@ class FourierNeuralOperator:
                 if self.enable_profile:
                     nvtx.range_pop() # end loss
 
+            total_loss += loss.item()
             optimizer.zero_grad()
             if self.debug:
                 print_rank0(f"[DEBUG] batch loss: {loss.item():.6e}, pred min/max: {pred.min().item():.6e}/{pred.max().item():.6e}, \
@@ -368,8 +370,7 @@ class FourierNeuralOperator:
                 self.writer.add_scalar("Gradients/Norm", grad_norm,iBatch)
 
             # print_rank0(f" At [{iBatch*batchSize + len(inp)}/{nSamples:>5d}] loss: {loss.item():>7f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}")
-            total_loss += loss.item()
-
+            
         if self.USE_TENSORBOARD:
             self.writer.add_scalar("LearningRate", optimizer.param_groups[0]['lr'], self.epochs)
 
@@ -616,11 +617,16 @@ class FourierNeuralOperator:
                 }
 
                 if self.dataClass == "rbc":
+                    if self.epochs == 1:
+                        f.write("Epochs\t\tTrainLoss\t\tValidLoss\t\tTrainIdLoss\t\tValidIdLoss\t\tGradNorm\t\tComputeTime\n")
                     line = "{epochs}\t{train:1.18f}\t{valid:1.18f}\t{train_id:1.18f}\t{valid_id:1.18f}\t{gradNorm:1.18f}\t{tComp}\n"
                     format_dict.update({
                         "train_id": self.losses["id"]["train"],
                         "valid_id": self.losses["id"]["valid"]
                     })
+                else:
+                    if self.epochs == 1:
+                        f.write("Epochs\t\tTrainLoss\t\tValidLoss\t\tGradNorm\t\tComputeTime\n")
 
                 f.write(line.format(**format_dict))
 
@@ -735,18 +741,9 @@ class FourierNeuralOperator:
                 outp = model(inpt)
                 if self.outType == "update":
                     outp /= self.outScaling
-
-                    # Mapping output to input shape to perform addition
-                    if outp.shape == inpt.shape:
-                        outp += inpt
-                    else:
-                        sliced_inpt = inpt[:,:,
-                                      self.modelConfig['iXBeg']: self.modelConfig['iXEnd'],
-                                      self.modelConfig['iYBeg']: self.modelConfig['iYEnd']]
-                        # print_rank0(f'Sliced Input: {sliced_inpt.shape}')
-                        outp += sliced_inpt
+                    outp += inpt
                 inpt = outp
 
-        #u1 = outp.cpu().detach().numpy()
+        # u1 = outp.cpu().detach().numpy()
         u1 = cp.from_dlpack(outp.detach())
         return u1

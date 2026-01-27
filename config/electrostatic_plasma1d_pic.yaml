@@ -1,5 +1,5 @@
 simu:
-  picFile: /p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/1D_PIC_data_22_01_26.h5
+  picFile: Datasets_1D_electrostatic_plasma/original_datasets/1D_PIC_data_22_01_26.h5
   nDim: 1
 
 sample:
@@ -15,12 +15,11 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: /p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5
+  dataFile: Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5
   trainRatio: 0.8
   batchSize: 20        # Global Batch size
   sampling_mode: None  # [fixed, ordered, random]
  
-
 model:
   da: 2
   du: 1
@@ -37,10 +36,10 @@ model:
   channel_mlp_expansion: 4
   use_skip_connection: false
   skip_type: soft-gating
-  use_dse: true
-  get_subdomain_output: false             # set to true only for inference
-  iXBeg: 0
-  iXEnd: 0
+  use_dse: true                        # Direct Spectral Evaluation
+  use_kb: false                         # Kaiser-Bessel NUFFT
+  use_toeplitz: false                   # Toeplitz NUFFT
+
 
 optim:
   name: adam
@@ -63,10 +62,10 @@ parallel_strategy:
   gpus_per_node: 4
 
 train:
-  trainDir: PIC1D_22_01_26
-  epochs: 100                     # nEpochs
+  trainDir: PIC1D
+  epochs: 5                    # nEpochs
   checkpoint: None
-  saveInterval: 50
+  saveInterval: 5
   disableTensorboard: true
 
 eval:
