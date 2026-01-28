@@ -9,7 +9,7 @@ from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer, NUFFTLayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
-from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
+#from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
 
 class FNOLayer(nn.Module):
 

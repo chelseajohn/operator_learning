@@ -50,6 +50,8 @@ class PICVisualizer:
             self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1])
        
 
+        self.xp0 = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
+        self.vp0 = cp.random.randn(self.N)
         # Set matplotlib defaults (better figures)
         plt.rcParams.update({
             "figure.figsize": (6, 4),
@@ -94,16 +96,17 @@ class PICVisualizer:
             - Computes kinetic, potential, and field energies, as well as momentum conservation.
         """
         # Storage arrays
-        pos = cp.zeros([self.NT, self.N], dtype=cp.float32)
-        Eout = cp.zeros([self.NT, self.N], dtype=cp.float32)
+        #pos = cp.zeros([self.NT, self.N], dtype=cp.float32)
+        #Eout = cp.zeros([self.NT, self.N], dtype=cp.float32)
         p = cp.arange(self.N, dtype=int)
         # Build Q-charge  array
-        charge = cp.full(pos.shape[1], -4 * cp.pi, dtype=cp.float32)
+        charge = cp.full(self.N, -4 * cp.pi, dtype=cp.float32)
 
         # Initial particle positions and velocities
-        xp = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
-        xp = cp.asarray(xp)
-        vp = cp.random.randn(self.N)
+        #xp = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
+        #vp = cp.random.randn(self.N)
+        xp = cp.asarray(self.xp0)
+        vp = self.vp0
         wp = 1.0
 
         # Mean and Std of training output data
@@ -126,21 +129,22 @@ class PICVisualizer:
             xp = toPeriodic(xp, self.Ln)
             #breakpoint()
             # Store particle positions
-            pos[it, :] = xp.astype(cp.float32)
+            #pos[it, :] = xp.astype(cp.float32)
         
             # Acceleration
             if ml_acc and model is not None:
                 t0 = time.time()
                 # Stack pos and rho
-                features = cp.stack([pos[it, :], charge], axis=0)
+                features = cp.stack([xp.astype(cp.float32), charge], axis=0)
                 inputs = features[None, :, :]    # [batch=1, particles, features]
                 inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
                 #out = model(inputs).flatten()
                 #breakpoint()
-                Eout[it, :] = model(inputs).flatten()
-                Eout[it,:] = Eout[it,:] * data_output_std + data_output_mean
+                Eout = model(inputs).flatten().squeeze()
+                Eout = Eout * data_output_std + data_output_mean
+                Eout = Eout - ((1/self.N) * cp.sum(Eout))
                 #breakpoint()
-                a = accelerateML(E=Eout[it,:].squeeze(), wp=wp, QM=self.QM)
+                a = accelerateML(E=Eout, wp=wp, QM=self.QM)
                 #breakpoint()
                 times_acc.append(time.time() - t0)
             else:
@@ -152,7 +156,7 @@ class PICVisualizer:
                 # Compute fields
                 phi, Eg = field(rho=rho, L=self.Ln, dim=self.dim)
                 
-                a, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
+                a, Eout = accelerate(M=M, E=Eg, wp=wp, QM=self.QM, it=it, dim=self.dim)
                 times_acc.append(time.time() - t0)
 
             # Update velocities and kinetic energy
@@ -164,7 +168,7 @@ class PICVisualizer:
             #breakpoint()
 
             # Electric field energy
-            Egp = cp.sum(Eout[it, :] ** 2) * self.Ln / self.N
+            Egp = cp.sum(Eout[:] ** 2) * self.Ln / self.N
 
             # Compute potential energy
             # Epotential = potential(rho=rho, phi=phi, dx=self.dx, dim=self.dim)
@@ -184,8 +188,8 @@ class PICVisualizer:
 
     def pic2D(self, ml_acc: bool = False, model = None, data_file = None):
         # Storage arrays
-        pos = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
-        Eout = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
+        #pos = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
+        #Eout = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
         p = cp.arange(self.N, dtype=int)
         # Build Q-charge  array
         charge = cp.full((1, 1, pos.shape[1]), self.Q*self.N, dtype=cp.float32)
@@ -242,7 +246,8 @@ class PICVisualizer:
                 # Compute fields
                 phi, Eg = field(rho=rho, L=self.L, dim=self.dim)
                 pos[it, :, :] = cp.transpose(xpn.astype(cp.float32))
-                an, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
+                #an, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
+                an = accelerate(M=M, E=Eg, wp=wp, QM=self.QM, it=it, dim=self.dim)
                 Efieldparticle = Eout[it,:,:].squeeze()
                 times_acc.append(time.time() - t0)
                 # Update velocities and kinetic energy
@@ -319,20 +324,21 @@ class PICVisualizer:
         plt.clf()
         return filename
 
-    def energy(self, ERef, EPred=None, EkRef=None, EpRef=None, EkPred=None, EpPred=None):
+    def energy(self, ERef=None, EPred=None, EkRef=None, EpRef=None, EkPred=None, EpPred=None):
         plt.figure()
         filename = self._img_path("landau_energy")
-        plt.plot(self.times, ERef / ERef[0], label='TotalEnergyRef', color='black')
-        if EpPred is not None:
+        if ERef is not None:
+            plt.plot(self.times, ERef / ERef[0], label='TotalEnergyRef', color='black')
+        if EPred is not None:
             plt.plot(self.times, EPred / EPred[0], label='TotalEnergyPred', linestyle="--", color='black')
         if EkRef is not None:
             plt.plot(self.times, EkRef / ERef[0], label='KERef', color='blue')
-            if EkPred is not None:
-                plt.plot(self.times, EkPred / EPred[0], label='KEPred', linestyle="--", color='blue')
+        if EkPred is not None:
+            plt.plot(self.times, EkPred / EPred[0], label='KEPred', linestyle="--", color='blue')
         if EpRef is not None:
             plt.plot(self.times, EpRef / ERef[0], label='PERef', color='red')
-            if EpPred is not None:
-                plt.plot(self.times, EpPred / EPred[0], label='PEPred', linestyle="--", color='red')
+        if EpPred is not None:
+            plt.plot(self.times, EpPred / EPred[0], label='PEPred', linestyle="--", color='red')
         plt.yscale('log')
         plt.ylabel('Normalized Energy')
         plt.xlabel(r'$\omega_p t$')
@@ -344,11 +350,13 @@ class PICVisualizer:
         plt.clf()
         return filename
 
-    def conservation_errors(self, ERef, pRef, EPred=None, pPred=None):
+    def conservation_errors(self, ERef=None, pRef=None, EPred=None, pPred=None):
         plt.figure()
         filename = self._img_path("conservation_errors")
-        plt.plot(self.times, np.abs(ERef - ERef[0]) / np.abs(ERef[0]), label='EnergyRef', color='blue')
-        plt.plot(self.times, np.abs(pRef - pRef[0]) / np.abs(pRef[0]), label='MomentumRef', color='red')
+        if ERef is not None:
+            plt.plot(self.times, np.abs(ERef - ERef[0]) / np.abs(ERef[0]), label='EnergyRef', color='blue')
+        if pRef is not None:
+            plt.plot(self.times, np.abs(pRef - pRef[0]) / np.abs(pRef[0]), label='MomentumRef', color='red')
         if EPred is not None:
             plt.plot(self.times, np.abs(EPred - EPred[0]) / np.abs(EPred[0]), label='EnergyPred', color='blue', linestyle="--")
         if pPred is not None:
@@ -364,13 +372,14 @@ class PICVisualizer:
         plt.clf()
         return filename
 
-    def landau_decay(self, Ex, ExPred=None, label='weak'):
+    def landau_decay(self, Ex=None, ExPred=None, label='weak'):
         a = np.linspace(0, (self.NT - 1) * self.DT, self.NT)
         #pp = period(self.k[0])
         #b = phiMax[int(pp // (2 * self.DT))] * np.exp((a[0:2000] - pp / 2) * decayRate(self.k[0]))
         plt.figure()
         filename = self._img_path("landau_decay_rateRef")
-        plt.plot(a, Ex, label=r'$\int ERef_x^2 dV$', color='blue')
+        if Ex is not None:
+            plt.plot(a, Ex, label=r'$\int ERef_x^2 dV$', color='blue')
         #plt.plot(a[0:2000], b, label='Predicted Decay Rate', color='green', linestyle="--")
         if(label == 'weak'):
             gamma1 = -0.3066
@@ -379,12 +388,12 @@ class PICVisualizer:
             gamma2 = 0.168
             ind2 = np.argmin(np.abs(a - 20.592))
             theo_ref2 = np.exp(gamma2 * a)
-            theo_ref2 = (Ex[ind2]/theo_ref2[ind2])*theo_ref2
+            theo_ref2 = (ExPred[ind2]/theo_ref2[ind2])*theo_ref2
 
 
         ind1 = np.argmin(np.abs(a - 2.5))
         theo_ref1 = np.exp(gamma1 * a)
-        theo_ref1 = (Ex[ind1]/theo_ref1[ind1])*theo_ref1
+        theo_ref1 = (ExPred[ind1]/theo_ref1[ind1])*theo_ref1
         plt.plot(a, theo_ref1, label='Predicted Decay Rate', color='seagreen')
         if(label == 'strong'):
             plt.plot(a, theo_ref2, label='Predicted Growth Rate', color='red')

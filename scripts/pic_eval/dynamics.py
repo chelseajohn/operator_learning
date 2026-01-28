@@ -12,7 +12,6 @@ from initial_conditions import findsource
 
 def accelerate(M: cp.ndarray, 
                E: cp.ndarray,
-               Eout: cp.ndarray, 
                wp: float, 
                QM: float,
                it: int,
@@ -36,14 +35,14 @@ def accelerate(M: cp.ndarray,
     if dim == 1:
         Etemp = M * E
         a = cp.transpose(Etemp) * QM / wp
-        Eout[it, :] = Etemp.astype(cp.float32)
+        Eout = Etemp.astype(cp.float32)
     else:
         Extemp = M * E[0].flatten()
         Eytemp = M * E[1].flatten()
         a1 = cp.transpose(Extemp) * QM / wp
         a2 = cp.transpose(Eytemp) * QM / wp
-        Eout[it,:,0] = Extemp.astype(cp.float32)
-        Eout[it,:,1] = Eytemp.astype(cp.float32)
+        #Eout[it,:,0] = Extemp.astype(cp.float32)
+        #Eout[it,:,1] = Eytemp.astype(cp.float32)
         a = cp.array([a1, a2])
     
     return a, Eout

@@ -1,5 +1,5 @@
 simu:
-  picFile: Datasets_1D_electrostatic_plasma/original_datasets/1D_PIC_data_22_01_26.h5
+  picFile: /p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/1D_PIC_data_22_01_26.h5
   nDim: 1
 
 sample:
@@ -15,7 +15,7 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5
+  dataFile: /p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5
   trainRatio: 0.8
   batchSize: 20        # Global Batch size
   sampling_mode: None  # [fixed, ordered, random]
@@ -63,9 +63,9 @@ parallel_strategy:
 
 train:
   trainDir: PIC1D
-  epochs: 5                    # nEpochs
+  epochs: 100                    # nEpochs
   checkpoint: None
-  saveInterval: 5
+  saveInterval: 50
   disableTensorboard: true
 
 eval:

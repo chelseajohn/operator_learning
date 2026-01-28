@@ -46,6 +46,8 @@ parser.add_argument(
 parser.add_argument(
     "--dim", default="1", type=int, help="dimension")
 parser.add_argument(
+    "--predOnly", action="store_true", help="Perform only ML predictions without reference results")
+parser.add_argument(
     "--config", default=None, help="configuration file")
 args = parser.parse_args()
 
@@ -63,14 +65,14 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device_name = torch.cuda.get_device_name(0) if device == 'cuda' else 'CPU'
 checkpoint = args.checkpoint
 dim = args.dim
+predOnly = args.predOnly
 vis = PICVisualizer(args)
-#breakpoint()
 
 if checkpoint is not None:
     fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
     if dim == 1:
         #posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file='/p/project1/pepcexa/muralikrishnan1/operator_learning/PIC1D_electrostatic.h5')
+        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file='/p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5')
         #phase_spacePred = vis.phase_space(xp=posPred, vp=velPred, wp=wPred, ml_acc=True)
         phase_spacePred = None
     else:
@@ -88,13 +90,24 @@ else:
     growth_ratePred = None
     speedup = 1
 
-if dim == 1:
-    posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic1D(ml_acc=False)
-    #phase_spaceRef = vis.phase_space(xp=posRef, vp=velRef, wp=wRef, ml_acc=False)
-    phase_spaceRef = None
+if predOnly is False:
+    if dim == 1:
+        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic1D(ml_acc=False)
+        #phase_spaceRef = vis.phase_space(xp=posRef, vp=velRef, wp=wRef, ml_acc=False)
+        phase_spaceRef = None
+    else:
+        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic2D(ml_acc=False)
+        phase_spaceRef = None
 else:
-    posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic2D(ml_acc=False)
+    EnergyRef = None
+    EkRef = None
+    EpRef = None
+    ERef = None
+    pRef = None
+    timeRef = None
     phase_spaceRef = None
+    growth_rateRef = None
+    speedup = 1
 
 #growth_rate = vis.twoStreamIppl(ExRef=ERef, ExPred=EPred)  
 energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EkPred=EkPred, EpRef=EpRef, EpPred=EpPred)
@@ -128,10 +141,10 @@ if phase_spacePred is not None:
 
 TEMPLATE  += f"\nAverage time for Accleration per timestep in PIC (microsec): {timeRef}\n"
 
-if timePred is not None:
-    speedup = round(timePred/timeRef,3)
+if timePred is not None and timeRef is not None:
+    speedup = round(timeRef/timePred,3)
     TEMPLATE += f"Average Inference time for Accleration using FNO (microsec): {timePred}\n"
-    TEMPLATE += f"Speed up FNO/PIC: {speedup}\n"
+    TEMPLATE += f"Speed up PIC/FNO: {speedup}\n"
                 
 summary.write(TEMPLATE.format(
         dim=dim,
