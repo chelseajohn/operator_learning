@@ -392,7 +392,7 @@ class FourierNeuralOperator:
 
         self.losses["model"]["train"] = train_loss
         self.gradientNormEpoch = gradsEpoch / nBatches
-        print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.6f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
+        print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.4e} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
 
         if self.benchmark:
             print_rank0(f"CUDA Memory for Fwd Pass - Allocated: {mean(fwd_peak_mem):.2f} MB")
@@ -412,6 +412,7 @@ class FourierNeuralOperator:
         # batchSize = self.valLoader.batch_size
         total_loss = 0.0
         relative_error = 0.0
+        median_error = torch.zeros(len(self.valLoader.dataset))
         data_iter = iter(self.valLoader)
 
         if self.dataClass == 'rbc':
@@ -449,6 +450,7 @@ class FourierNeuralOperator:
                 error = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))/torch.mean(torch.abs(ref.flatten(start_dim=1))) * 100
                 total_loss += loss.item()
                 relative_error += error.item()
+                median_error[iBatch] = error.item()
                 # if self.enable_profile:
                 #     nvtx.range_pop() # end loss
                 #     nvtx.range_pop() # end batch
@@ -471,7 +473,7 @@ class FourierNeuralOperator:
             val_loss = avg_loss
 
         self.losses["model"]["valid"] = val_loss
-        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.6f} Test Error={relative_error:.2f} (id: {idLoss:>7f})\n")
+        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.4e} Test Error={relative_error:.2f}% Median Test Error={torch.median(median_error).item():.4f}% (id: {idLoss:>7f})\n")
 
     def learn(self, nEpoch, save_interval=100):
         self.epochs += 1
