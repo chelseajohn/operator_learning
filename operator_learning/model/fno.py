@@ -43,10 +43,10 @@ class FNOLayer(nn.Module):
         if self.use_postfnochannel_mlp:
             self.channel_mlp = MLP(mode='channel',
                                    n_layers=2,
-                                    n_dims=n_dims,
-                                    in_channels=dv,
-                                    out_channels=dv,
-                                    hidden_channels=2*dv
+                                   n_dims=n_dims,
+                                   in_channels=dv,
+                                   out_channels=dv,
+                                   hidden_channels=2*dv
                                 )
 
         # self.W = GridLinear(inSize=dv,
@@ -201,12 +201,22 @@ class FNO(nn.Module):
 
         if self.use_dse:
             if self.n_dims == 1:
-                transform_coeff = VandermondeTransform(positions=x[:,0,:], 
-                                                kX=self.kX, 
-                                                kY=self.kY,
-                                                dim=self.n_dims,
-                                                device=self.device,
-                                                dtype=self.data_type)
+                transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                                                       kX=self.kX, 
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.data_type)
+            elif self.n_dims == 2:
+                transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                                                       y_positions=x[:,1,:],
+                                                       kX=self.kX, 
+                                                       kY=self.kY,
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.data_type)
+            else:
+                raise ValueError("Vandermonde Transform not implemented for 3D")
+
         if self.use_toeplitz:
             transform_coeff = NUFFTTransform(device=self.device, dataClass='pic', transform='toeplitz', 
                                        dv=self.dv, kX=self.kX,
@@ -261,4 +271,4 @@ if __name__ == "__main__":
     uIn_3d = torch.rand(5, 5, 64, 64, 32)
     print_rank0(f"FNO1D Model Output:{model1D(uIn_1d).shape}, FNOModel: {model1D}")
     print_rank0(f"FNO2D Model Output:{model2D(uIn_2d).shape}, FNOModel: {model2D}")
-    print_rank0(f"FNO3D Model Output:{model3D(uIn_3d).shape}")
+    print_rank0(f"FNO3D Model Output:{model3D(uIn_3d).shape}, FNOModel: {model3D}")
