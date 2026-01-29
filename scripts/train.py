@@ -10,6 +10,7 @@ import torch
 import torch.multiprocessing as mp
 from training.train_fno import FourierNeuralOperator
 from operator_learning.utils.misc import readConfig, print_rank0, enable_tf32_only_on_a100
+import numpy as np
 
 
 # -----------------------------------------------------------------------------
@@ -92,6 +93,13 @@ def main(args):
         torch.distributed.destroy_process_group()
 
 if __name__ == "__main__":
+    seed = 152
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.autograd.set_detect_anomaly(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     enable_tf32_only_on_a100()
     if args.compile_train == 1:
         mp.set_start_method("spawn", force=True)
