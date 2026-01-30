@@ -8,6 +8,8 @@ sys.path.append(str(base_path))
 
 import argparse
 import torch
+import numpy as np
+import cupy as cp
 
 from operator_learning.utils.misc import readConfig
 from training.train_fno import FourierNeuralOperator
@@ -66,17 +68,24 @@ device_name = torch.cuda.get_device_name(0) if device == 'cuda' else 'CPU'
 checkpoint = args.checkpoint
 dim = args.dim
 predOnly = args.predOnly
+
+seed = 152
+torch.manual_seed(seed)
+np.random.seed(seed)
+cp.random.seed(seed)
+torch.cuda.manual_seed_all(seed)
 vis = PICVisualizer(args)
 
 if checkpoint is not None:
     fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
     if dim == 1:
         #posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file='/p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5')
+        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file='/p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5')
         #phase_spacePred = vis.phase_space(xp=posPred, vp=velPred, wp=wPred, ml_acc=True)
         phase_spacePred = None
     else:
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
+        #posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
+        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file='/p/project1/hai_1073/muralikrishnan1/Datasets_2D_electrostatic_plasma/PIC2D_electrostatic_29_01_26.h5')
         phase_spacePred = None
 
 else:
@@ -92,11 +101,11 @@ else:
 
 if predOnly is False:
     if dim == 1:
-        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic1D(ml_acc=False)
+        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, timeRef = vis.pic1D(ml_acc=False)
         #phase_spaceRef = vis.phase_space(xp=posRef, vp=velRef, wp=wRef, ml_acc=False)
         phase_spaceRef = None
     else:
-        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic2D(ml_acc=False)
+        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, EypRef, timeRef = vis.pic2D(ml_acc=False)
         phase_spaceRef = None
 else:
     EnergyRef = None
@@ -112,7 +121,10 @@ else:
 #growth_rate = vis.twoStreamIppl(ExRef=ERef, ExPred=EPred)  
 energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EkPred=EkPred, EpRef=EpRef, EpPred=EpPred)
 conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
-landau_decay = vis.landau_decay(Ex=ERef, ExPred=EPred)
+if dim == 1:
+    landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, label='strong')
+else:
+    landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label='strong')
 
 HEADER = """
 # FNO evaluation for PIC in {dim}D on {device}
@@ -139,11 +151,11 @@ if phase_spaceRef is not None:
 if phase_spacePred is not None:
     TEMPLATE += f"- [Phase space Pred]({phase_spacePred})\n"
 
-TEMPLATE  += f"\nAverage time for Accleration per timestep in PIC (microsec): {timeRef}\n"
+TEMPLATE  += f"\nAverage time for Accleration per timestep in PIC (millisec): {timeRef}\n"
 
 if timePred is not None and timeRef is not None:
     speedup = round(timeRef/timePred,3)
-    TEMPLATE += f"Average Inference time for Accleration using FNO (microsec): {timePred}\n"
+    TEMPLATE += f"Average Inference time for Accleration using FNO (millisec): {timePred}\n"
     TEMPLATE += f"Speed up PIC/FNO: {speedup}\n"
                 
 summary.write(TEMPLATE.format(

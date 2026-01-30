@@ -35,7 +35,10 @@ class PICVisualizer:
         self.NT = int(self.T/self.DT) 
         self.times = np.linspace(0, self.NT * self.DT, self.NT)   # number of time steps
         self.dim = args.dim
-        self.k = np.array([args.kc]*self.dim)
+        if self.dim == 1:
+            self.k = np.array([args.kc])
+        else:
+            self.k = np.array([args.kc, args.kc])
         self.L = 2*np.pi/self.k                                   # Length of the container  
         self.dx = np.array(self.L / self.NG) # cell length 
         self.Ln = cp.asarray(self.L)
@@ -50,8 +53,7 @@ class PICVisualizer:
             self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1])
        
 
-        self.xp0 = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
-        self.vp0 = cp.random.randn(self.N)
+        self.xp0,self.vp0 = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
         # Set matplotlib defaults (better figures)
         plt.rcParams.update({
             "figure.figsize": (6, 4),
@@ -181,8 +183,8 @@ class PICVisualizer:
             Exp.append(Egp.get())
             momentum.append((cp.abs(cp.sum(self.Q * vp / self.QM))).get())
 
-        time_acc_mean = np.round(np.mean(times_acc)*(10**6),3)
-        print(f"Average acceleration time per iteration: {time_acc_mean:.3f} microsec")
+        time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
+        print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
 
         return xp, vp, wp, E, Ek, Ep, momentum, Exp, time_acc_mean
 
@@ -192,13 +194,14 @@ class PICVisualizer:
         #Eout = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
         p = cp.arange(self.N, dtype=int)
         # Build Q-charge  array
-        charge = cp.full((1, 1, pos.shape[1]), self.Q*self.N, dtype=cp.float32)
+        charge = cp.full((1, 1, self.N), self.Q*self.N, dtype=cp.float32)
+        #charge = cp.full((1, 1, 500000), self.Q*self.N, dtype=cp.float32)
 
         # Initial particle positions and velocities
-        xpn, vpn = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
-        xpc, vpc = np.transpose(xpn), np.transpose(vpn)
+        #xpn, vpn = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
+        xpc, vpc = np.transpose(self.xp0), np.transpose(self.vp0)
         xp, vp = cp.asarray(xpc), cp.asarray(vpc)
-        xpn, vpn = cp.asarray(xpn), cp.asarray(vpn)
+        xpn, vpn = cp.asarray(self.xp0), cp.asarray(self.vp0)
         wp = 1.0
 
         # Mean and Std of training output data
@@ -208,12 +211,16 @@ class PICVisualizer:
             data_output_std = data['infos']['output_std'][()]
 
         # Energy and momentum tracking
-        Ek, Ep, Exp, E, momentum = [], [], [], [], []
+        Ek, Ep, Exp, Eyp, E, momentum = [], [], [], [], [], []
          # Time tracking
         times_acc = []
-     
+    
+        pos_path = '/p/project1/hai_1073/muralikrishnan1/Datasets_2D_electrostatic_plasma/pos_strongLandau_pif_500k.npy'
+        eout_path = '/p/project1/hai_1073/muralikrishnan1/Datasets_2D_electrostatic_plasma/Eout_strongLandau_pif_500k.npy'
+        ss = 5
         for it in range(self.NT):
            
+            print(it)
             # Acceleration
             if ml_acc and model is not None:
                 t0 = time.time()
@@ -221,21 +228,43 @@ class PICVisualizer:
                 xp = toPeriodicND(xp, self.L, dim=self.dim) # [particle, channel]
                 # Stack pos and charge
                 xt = cp.transpose(xp)  # [channel, particle]
+                #breakpoint()
                 positions = xt[None, :, :]
-                positions[:, 0, :] = normalize_per_sample(positions[:, 0, :])
-                positions[:, 1, :] = normalize_per_sample(positions[:, 1, :])
+                #pos_full = np.load(pos_path)[it]
+                #true_efields = np.load(eout_path)[it]
+                #pos_ss = pos_full[::ss]
+                #positions = cp.asarray(pos_ss[None, :, :])
+                #positions = cp.swapaxes(positions, 1, 2)
+                #breakpoint()
                 inputs = cp.concatenate([positions, charge], axis=1) # [batch=1, channel=3, particles]
+                inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
+                inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
+                #breakpoint()
                 prediction = model(inputs) # [1, channel=2, particle]
+                ##breakpoint()
                 Efieldparticle = cp.swapaxes(prediction, 1, 2).squeeze()  # [particles, channel=2]
                 Efieldparticle[:,0] = Efieldparticle[:,0] * data_output_std[0] + data_output_mean[0]
                 Efieldparticle[:,1] = Efieldparticle[:,1] * data_output_std[1] + data_output_mean[1]
-                Efieldparticle[:,0] = Efieldparticle[:,0] - ((1/N) * cp.sum(Efieldparticle[:,0]))
-                Efieldparticle[:,1] = Efieldparticle[:,1] - ((1/N) * cp.sum(Efieldparticle[:,1]))
+                Efieldparticle[:,0] = Efieldparticle[:,0] - ((1/self.N) * cp.sum(Efieldparticle[:,0]))
+                Efieldparticle[:,1] = Efieldparticle[:,1] - ((1/self.N) * cp.sum(Efieldparticle[:,1]))
+                #EfieldparticleRef = true_efields[::ss]
+                #output_filename = f"comparison_spatial_timestep_{it}.png"
+                #self.visualize_spatial_comparison(pos_ss, pos_ss, EfieldparticleRef, Efieldparticle.get(), it, output_filename)
+                #self.visualize_spatial_comparison(pos_ss, xp.get(), EfieldparticleRef, Efieldparticle.get(), it, output_filename)
                 a = accelerateML(E=Efieldparticle, wp=wp, QM=self.QM)
-                times_acc.append(time.time() - t0)
                 vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
                 # Update positions and weights
+                #breakpoint()
                 xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.L, it=it)
+                #breakpoint()
+                momx = cp.sum(self.Q * vp[:,0] / self.QM)
+                momy = cp.sum(self.Q * vp[:,1] / self.QM)
+                # Electric field energy
+                Egpx = cp.sum(Efieldparticle[:,0]**2) * (self.L[0] * self.L[1]) / self.N
+                Egpy = cp.sum(Efieldparticle[:,1]**2) * (self.L[0] * self.L[1]) / self.N
+                # Compute potential energy
+                Epotential = cp.sum(Efieldparticle[:,0]**2 + Efieldparticle[:,1]**2) * 0.5 * (self.L[0] * self.L[1]) / self.N
+                times_acc.append(time.time() - t0)
             else:
                 t0 = time.time()
                 xpn = toPeriodicNDTranspose(xpn, self.L, dim=self.dim)
@@ -245,37 +274,39 @@ class PICVisualizer:
 
                 # Compute fields
                 phi, Eg = field(rho=rho, L=self.L, dim=self.dim)
-                pos[it, :, :] = cp.transpose(xpn.astype(cp.float32))
+                #pos[it, :, :] = cp.transpose(xpn.astype(cp.float32))
                 #an, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
-                an = accelerate(M=M, E=Eg, wp=wp, QM=self.QM, it=it, dim=self.dim)
-                Efieldparticle = Eout[it,:,:].squeeze()
-                times_acc.append(time.time() - t0)
+                an, Efieldparticle = accelerate(M=M, E=Eg, wp=wp, QM=self.QM, it=it, dim=self.dim)
+                #Efieldparticle = Eout[it,:,:].squeeze()
                 # Update velocities and kinetic energy
-                vpn, kineticn = push(vp=vpn, a=an, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
+                vpn, kinetic = push(vp=vpn, a=an, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
                 # Update positions and weights
                 xpn, wp = move(xp=xpn, vp=vpn, wp=wp, DT=self.DT, L=self.L, it=it)
+                #breakpoint()
+                momx = cp.sum(self.Q * vpn[0,:] / self.QM)
+                momy = cp.sum(self.Q * vpn[1,:] / self.QM)
+                # Electric field energy
+                Egpx = cp.sum(Efieldparticle[0,:]**2) * (self.L[0] * self.L[1]) / self.N
+                Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.L[0] * self.L[1]) / self.N
+                # Compute potential energy
+                Epotential = cp.sum(Efieldparticle[0,:]**2 + Efieldparticle[1,:]**2) * 0.5 * (self.L[0] * self.L[1]) / self.N
+                times_acc.append(time.time() - t0)
 
 
 
-            # Electric field energy
-            Egp = cp.sum(Efieldparticle[:,1]**2) * (self.L[0] * self.L[1]) / self.N
-   
-            # Compute potential energy
-            Epotential = cp.sum(Efieldparticle[:,0]**2 + Efieldparticle[:,1]**2) * 0.5 * (self.L[0] * self.L[1]) / self.N
             
             # Append energies and momentum
             Ek.append(kinetic.get())
             Ep.append(Epotential.get())
             E.append((kinetic + Epotential).get())
-            Exp.append(Egp.get())
-            momx = cp.sum(self.Q * vp[:,0] / self.QM)
-            momy = cp.sum(self.Q * vp[:,1] / self.QM)
+            Exp.append(Egpx.get())
+            Eyp.append(Egpy.get())
             momentum.append((cp.sqrt(momx**2 + momy**2)).get())
 
         time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
 
-        return xp, vp, wp, E, Ek, Ep, momentum, Exp, time_acc_mean
+        return xp, vp, wp, E, Ek, Ep, momentum, Exp, Eyp, time_acc_mean
 
     # ---------------------------
     # Plotting methods
@@ -372,7 +403,7 @@ class PICVisualizer:
         plt.clf()
         return filename
 
-    def landau_decay(self, Ex=None, ExPred=None, label='weak'):
+    def landau_decay(self, Ex=None, ExPred=None, Ey=None, EyPred=None, label='weak'):
         a = np.linspace(0, (self.NT - 1) * self.DT, self.NT)
         #pp = period(self.k[0])
         #b = phiMax[int(pp // (2 * self.DT))] * np.exp((a[0:2000] - pp / 2) * decayRate(self.k[0]))
@@ -380,6 +411,8 @@ class PICVisualizer:
         filename = self._img_path("landau_decay_rateRef")
         if Ex is not None:
             plt.plot(a, Ex, label=r'$\int ERef_x^2 dV$', color='blue')
+        if Ey is not None:
+            plt.plot(a, Ey, label=r'$\int ERef_y^2 dV$', color='orange')
         #plt.plot(a[0:2000], b, label='Predicted Decay Rate', color='green', linestyle="--")
         if(label == 'weak'):
             gamma1 = -0.3066
@@ -398,13 +431,18 @@ class PICVisualizer:
         if(label == 'strong'):
             plt.plot(a, theo_ref2, label='Predicted Growth Rate', color='red')
         if ExPred is not None:
-            plt.plot(a, ExPred, label=r'$\int EPred_x^2 dV$', color='orange')
+            plt.plot(a, ExPred, label=r'$\int EPred_x^2 dV$', color='blue', linestyle="--")
+        
+        if EyPred is not None:
+            plt.plot(a, EyPred, label=r'$\int EPred_y^2 dV$', color='orange', linestyle="--")
         plt.title(f'Landau Damping Decay Rate (k={self.k})')
         plt.yscale('log')
-        plt.ylabel(r'$\int E_x^2 dV$')
+        plt.ylabel(r'$\int E_x^2 dV$, $\int E_y^2 dV$')
         plt.xlabel(r'$\omega_p t$')
         plt.legend()
         plt.grid(True)
+        if(label == 'strong'):
+            plt.ylim(1e-4,1e2)
         plt.tight_layout()
         plt.savefig(f"{self.eval_dir}/{filename}", dpi=200)
         plt.clf()

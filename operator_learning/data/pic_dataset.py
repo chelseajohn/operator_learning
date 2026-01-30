@@ -131,7 +131,8 @@ def normalize_per_sample(data: cp.ndarray) -> cp.ndarray:
     data_max = data.max(axis=1, keepdims=True)
     #denom = cp.where(data_max > data_min, data_max - data_min, 1.0)
     denom = np.where(data_max > data_min, data_max - data_min, 1.0)
-    return (data - data_min) / denom
+    new_data = (data - data_min) / denom
+    return new_data
 
 
 def normalize_global_zscore(data: np.ndarray) -> Tuple[np.ndarray, float, float]:
@@ -159,7 +160,8 @@ def load_h5Dataset(file_path: str, keys: List[str], iEnd: Optional[int] = None, 
     datasets = []
     with h5py.File(file_path, "r") as f:
         for key in keys:
-            data = f[key][:(iEnd if key == 'pos_weakLandau' or key == 'Eout_weakLandau' else None):step, :]
+            #data = f[key][:(iEnd if key == 'pos_weakLandau' or key == 'Eout_weakLandau' else None):step, :]
+            data = f[key][:iEnd:1, ::step]
             datasets.append(np.array(data, dtype=np.float32))
     return datasets
 
@@ -179,8 +181,10 @@ def createDatasetFromPIC(picFile: str,
                          outScaling: float = 1.0):
     # tested for 1D and 2D
     assert nDim in (1,2), 'tested only for 1D and 2D'
-    input_keys = ["pos_weakLandau", "pos_strongLandau", "pos_tsi", "pos_bti"]
-    output_keys = ["Eout_weakLandau", "Eout_strongLandau", "Eout_tsi", "Eout_bti"]
+    #input_keys = ["pos_weakLandau", "pos_strongLandau", "pos_tsi", "pos_bti"]
+    #output_keys = ["Eout_weakLandau", "Eout_strongLandau", "Eout_tsi", "Eout_bti"]
+    input_keys = ["pos_strongLandau_pif_500k"]
+    output_keys = ["Eout_strongLandau_pif_500k"]
 
     # Load inputs and outputs
     inputs_list = load_h5Dataset(picFile, input_keys, iEnd, step)
@@ -197,11 +201,12 @@ def createDatasetFromPIC(picFile: str,
 
 
     # Build Q array
-    q1_xsize = sum(t.shape[0] for t in inputs_list[:3])
-    q1_ysize = inputs_list[0].shape[1]
-    q1 = np.full((q1_xsize, q1_ysize), -4 * np.pi, dtype=np.float32)
-    q2 = np.full((inputs_list[-1].shape[0], inputs_list[-1].shape[1]), -2 * np.pi / 0.21, dtype=np.float32)
-    Q = np.concatenate((q1, q2), axis=0)  # (timestep, position)
+    #q1_xsize = sum(t.shape[0] for t in inputs_list[:3])
+    #q1_ysize = inputs_list[0].shape[1]
+    #q1 = np.full((q1_xsize, q1_ysize), -((4 * np.pi)**nDim), dtype=np.float32)
+    #q2 = np.full((inputs_list[-1].shape[0], inputs_list[-1].shape[1]), -((2 * np.pi / 0.21)**nDim), dtype=np.float32)
+    #Q = np.concatenate((q1, q2), axis=0)  # (timestep, position)
+    Q = np.full((inputs_list[-1].shape[0], inputs_list[-1].shape[1]), -((2 * np.pi / 0.5)**nDim), dtype=np.float32)
     # Stack Q as extra channel
     # shape: (timestep, dim+1, features); features: position, charge
     if nDim == 1:

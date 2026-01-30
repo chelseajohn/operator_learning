@@ -85,29 +85,23 @@ def InvTransSampling(alpha: float, k: np.ndarray, L: float, N: int, dim: int) ->
     if dim == 1:
         xp = np.zeros(N)
         u0 = np.random.rand(N)
+        vp = np.random.randn(self.N)
         for i in range(N):
             print(i)
             u = L[0] * u0[i]
             x = u / (1 + alpha)  # initial guess
             xp[i], _ = Newton1d(x, alpha, k[0], u)
-        return xp
+        return xp,vp
     else:
         xp = np.zeros([2, N])
-        vp = np.zeros([2, N])
-        vp[0,:] = np.random.randn(1, N)
-        sigma = 1 / np.sqrt(2)
-        ninetypercent = int(0.9*N)
-        rem = N - ninetypercent
-        vp[1,:ninetypercent] = sigma * np.random.randn(ninetypercent)
-        vp[1,ninetypercent:] =  4.0 + sigma * np.random.randn(rem)
+        vp = np.random.randn(2, N)
         u0 = np.random.rand(2, N)
-        xp[0,:] = L[0] * u0[0,:]
         for i in range(N):
             print(i)
-            u =  L[1] * u0[1, i]
-            x = u / (1+alpha)
-            xp[1,i],niter = Newton1d(x,alpha,k[1],u)
-
+            for d in range(2):
+                u =  L[d] * u0[d, i]
+                x = u / (1+alpha)
+                xp[d,i],niter = Newton1d(x,alpha,k[d],u)
         return xp,vp
 
 

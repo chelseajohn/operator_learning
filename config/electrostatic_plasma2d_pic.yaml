@@ -1,10 +1,10 @@
 simu:
-  picFile: electrostatic_plasma2D.h5
+  picFile: /p/project1/hai_1073/muralikrishnan1/Datasets_2D_electrostatic_plasma/2D_PIF_strong_landau_29_01_26.h5
   nDim: 2
 
 sample:
   iEnd: 600
-  step: 1
+  step: 5
 
 data:
   dataClass: pic
@@ -15,9 +15,9 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: fno_data/PIC2D_electrostatic.h5
+  dataFile: /p/project1/hai_1073/muralikrishnan1/Datasets_2D_electrostatic_plasma/PIC2D_electrostatic_29_01_26.h5
   trainRatio: 0.8
-  batchSize:  8        # Global Batch size 
+  batchSize:  12        # Global Batch size 
   sampling_mode: None  # [fixed, ordered, random]
  
 
@@ -37,15 +37,15 @@ model:
   channel_mlp_expansion: 4
   use_skip_connection: false
   skip_type: soft-gating
-  use_dse: false                        # Direct Spectral Evaluation
-  use_kb: true                          # Kaiser-Bessel NUFFT
+  use_dse: true                        # Direct Spectral Evaluation
+  use_kb: false                          # Kaiser-Bessel NUFFT
   use_toeplitz: false                   # Toeplitz NUFFT
 
 
 optim:
   name: adam
   lr: 1.0e-3
-  weight_decay: 1.0e-5
+  weight_decay: 1.0e-4
 
 lr_scheduler:
   # scheduler: CosAnnealingLR
@@ -64,9 +64,9 @@ parallel_strategy:
 
 train:
   trainDir: PIC2D
-  epochs: 5                     # nEpochs
-  checkpoint: None
-  saveInterval: 5
+  epochs: 250                     # nEpochs
+  checkpoint: /p/project1/pepcexa/muralikrishnan1/operator_learning/scripts/PIC2D/model_epoch250.pt 
+  saveInterval: 50
   disableTensorboard: true
 
 eval:
@@ -76,18 +76,18 @@ eval:
   dim: 2
   kc : 0.5
   NG : 32
-  T: 5
+  T: 60.0
   dt: 0.05
   Vt: 1
-  nParticle: 50
+  nParticle: 1000000
   Qm : -1
-  alpha: 0.01
+  alpha: 0.5
   
 profile:
   enableProfiler: false
   profiler: nsys
   profileDir: nsysProf
-  evalOnly: false
+  evalOnly: true
   input_shape: [1,3,10000]   # relevant only if evalOnly=true or compile_eval=true
   use_amp: 0
   use_complex_amp: 0

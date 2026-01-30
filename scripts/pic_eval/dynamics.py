@@ -44,6 +44,9 @@ def accelerate(M: cp.ndarray,
         #Eout[it,:,0] = Extemp.astype(cp.float32)
         #Eout[it,:,1] = Eytemp.astype(cp.float32)
         a = cp.array([a1, a2])
+        Eout = cp.zeros([2, a.shape[1]])
+        Eout[0,:] = Extemp.astype(cp.float32) 
+        Eout[1,:] = Eytemp.astype(cp.float32)
     
     return a, Eout
 
@@ -60,7 +63,9 @@ def accelerateML(E: cp.ndarray, wp: float, QM: float):
     Returns:
         cp.ndarray: Particle accelerations.
     """
-    return E * QM / wp
+    a = E * QM / wp
+    
+    return a 
 
 
 def push(vp: cp.ndarray, a: cp.ndarray, 
