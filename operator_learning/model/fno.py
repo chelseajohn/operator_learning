@@ -103,7 +103,8 @@ class FNO(nn.Module):
                  use_dse=False,
                  use_toeplitz=False,
                  use_kb=False,
-                 dataset=None,dataClass='pic',
+                 dataset=None,
+                 dataClass='pic',
                  use_complex_amp=False,
                  matrix_free=False,
                  device='cpu',
@@ -122,9 +123,9 @@ class FNO(nn.Module):
 
         # DSE not implemented for 3D
         self.use_dse = use_dse
-        # Toeplitz implemented only for PIC1D
+        # Toeplitz cannot be implemented for PIC
         self.use_toeplitz = use_toeplitz
-        # KB implemented only for PIC1D and PIC2D
+        # KB implemented only for PIC1D 
         self.use_kb = use_kb 
         assert sum([self.use_dse, self.use_toeplitz, self.use_kb]) <= 1, \
             "Exactly one of use_dse, use_toeplitz, or use_kb must be True."
@@ -143,15 +144,15 @@ class FNO(nn.Module):
                           use_complex_amp=use_complex_amp,
                          )
                  for _ in range(n_layers)])
-        elif use_toeplitz:
-            self.layers = nn.ModuleList(
-                [NUFFTLayer(dv=dv, 
-                          kX=kX, dataClass=dataClass,
-                          non_linearity=non_linearity,
-                          bias=bias,
-                          dim=n_dims,
-                          use_complex_amp=use_complex_amp)
-                 for _ in range(n_layers)])
+        # elif use_toeplitz:
+        #     self.layers = nn.ModuleList(
+        #         [NUFFTLayer(dv=dv, 
+        #                   kX=kX, dataClass=dataClass,
+        #                   non_linearity=non_linearity,
+        #                   bias=bias,
+        #                   dim=n_dims,
+        #                   use_complex_amp=use_complex_amp)
+        #          for _ in range(n_layers)])
         elif use_kb:
             self.layers = nn.ModuleList(
                 [NUFFTLayer(dv=dv,
@@ -217,17 +218,19 @@ class FNO(nn.Module):
             else:
                 raise ValueError("Vandermonde Transform not implemented for 3D")
 
-        if self.use_toeplitz:
-            transform_coeff = NUFFTTransform(device=self.device, dataClass='pic', transform='toeplitz', 
-                                       dv=self.dv, kX=self.kX,
-                                       kY=self.kY, dim=self.n_dims, 
-                                       dtype=self.data_type)
+        # if self.use_toeplitz:
+        #     transform_coeff = NUFFTTransform(device=self.device,
+        #                                      dataClass='pic',
+        #                                      transform='toeplitz', 
+        #                                      dim=self.n_dims, 
+        #                                      dtype=self.data_type)
         
         if self.use_kb:
-            transform_coeff = NUFFTTransform(device=self.device, dataClass='pic', transform='kb', 
-                                       dv=self.dv, kX=self.kX,
-                                       kY=self.kY, dim=self.n_dims, 
-                                       dtype=self.data_type)
+            transform_coeff = NUFFTTransform(device=self.device, 
+                                             dataClass='pic',
+                                             transform='kb', 
+                                             dim=self.n_dims, 
+                                             dtype=self.data_type)
 
 
         x = x.permute(0,2,1)
