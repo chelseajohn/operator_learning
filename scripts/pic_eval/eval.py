@@ -50,6 +50,8 @@ parser.add_argument(
 parser.add_argument(
     "--predOnly", action="store_true", help="Perform only ML predictions without reference results")
 parser.add_argument(
+    "--testCase", default="strongLandau", help="Choose the test case among weakLandau, strongLandau, tsi or bti")
+parser.add_argument(
     "--config", default=None, help="configuration file")
 args = parser.parse_args()
 
@@ -68,6 +70,7 @@ device_name = torch.cuda.get_device_name(0) if device == 'cuda' else 'CPU'
 checkpoint = args.checkpoint
 dim = args.dim
 predOnly = args.predOnly
+testCase = args.testCase
 
 seed = 152
 torch.manual_seed(seed)
@@ -79,13 +82,11 @@ vis = PICVisualizer(args)
 if checkpoint is not None:
     fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
     if dim == 1:
-        #posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file='/p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5')
+        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
         #phase_spacePred = vis.phase_space(xp=posPred, vp=velPred, wp=wPred, ml_acc=True)
         phase_spacePred = None
     else:
-        #posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file='/p/project1/hai_1073/muralikrishnan1/Datasets_2D_electrostatic_plasma/PIC2D_electrostatic_29_01_26.h5')
+        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
         phase_spacePred = None
 
 else:
@@ -124,7 +125,10 @@ conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=p
 if dim == 1:
     landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, label='strong')
 else:
-    landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label='strong')
+    if ((testCase == "weakLandau") or (testCase == "strongLandau")):
+        landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
+    elif ((testCase == "tsi") or (testCase == "bti")):
+        growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
 
 HEADER = """
 # FNO evaluation for PIC in {dim}D on {device}
@@ -163,7 +167,7 @@ summary.write(TEMPLATE.format(
         device=device,
         energy=energy,
         conserv_errors=conserv_error,
-        landau_decay=landau_decay,
+        landau_decay=None,
         phase_spaceRef=phase_spaceRef,
         phase_spacePred=phase_spacePred,
         growth_rate=None,

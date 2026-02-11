@@ -68,7 +68,7 @@ def Newton1d(xi: float, alpha: float, kd: float, u: float) -> tuple[float, int]:
     return x, k
 
 
-def InvTransSampling(alpha: float, k: np.ndarray, L: float, N: int, dim: int) -> np.ndarray:
+def InvTransSampling(alpha: float, k: np.ndarray, L: float, N: int, dim: int, label='tsi') -> np.ndarray:
     """
     Generate particle positions using inverse transform sampling for a sinusoidal perturbation.
 
@@ -94,14 +94,46 @@ def InvTransSampling(alpha: float, k: np.ndarray, L: float, N: int, dim: int) ->
         return xp,vp
     else:
         xp = np.zeros([2, N])
-        vp = np.random.randn(2, N)
-        u0 = np.random.rand(2, N)
-        for i in range(N):
-            print(i)
-            for d in range(2):
-                u =  L[d] * u0[d, i]
+        if((label == 'weakLandau') or (label == 'strongLandau')): 
+            vp = np.random.randn(2, N)
+            u0 = np.random.rand(2, N)
+            for i in range(N):
+                print(i)
+                for d in range(2):
+                    u =  L[d] * u0[d, i]
+                    x = u / (1+alpha)
+                    xp[d,i],niter = Newton1d(x,alpha,k[d],u)
+        elif(label == 'tsi'):
+            vp = np.zeros([2, N])
+            vp[0,:] = np.random.randn(1, N)
+            Nhalf = int(N/2)
+            vp[1,:Nhalf] = -np.pi/2.0 + 0.1 * np.random.randn(Nhalf)
+            vp[1,Nhalf:] =  np.pi/2.0 + 0.1 * np.random.randn(Nhalf)
+            u0 = np.random.rand(2, N)
+            xp[0,:] = L[0] * u0[0,:]
+            for i in range(N):
+                print(i)
+                u =  L[1] * u0[1, i]
                 x = u / (1+alpha)
-                xp[d,i],niter = Newton1d(x,alpha,k[d],u)
+                xp[1,i],niter = Newton1d(x,alpha,k[1],u)
+        elif(label == 'bti'):
+            vp = np.zeros([2, N])
+            vp[0,:] = np.random.randn(1, N)
+            sigma = 1 / np.sqrt(2)
+            ninetypercent = int(0.9*N)
+            rem = N - ninetypercent
+            vp[1,:ninetypercent] = sigma * np.random.randn(ninetypercent)
+            vp[1,ninetypercent:] =  4.0 + sigma * np.random.randn(rem)
+            u0 = np.random.rand(2, N)
+            xp[0,:] = L[0] * u0[0,:]
+            for i in range(N):
+                print(i)
+                u =  L[1] * u0[1, i]
+                x = u / (1+alpha)
+                xp[1,i],niter = Newton1d(x,alpha,k[1],u)
+        
+
+
         return xp,vp
 
 

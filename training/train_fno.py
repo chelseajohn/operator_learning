@@ -375,8 +375,8 @@ class FourierNeuralOperator:
             self.writer.add_scalar("LearningRate", optimizer.param_groups[0]['lr'], self.epochs)
 
         scheduler_step(scheduler)
-        #avg_loss = total_loss / nBatches
-        avg_loss = total_loss / len(self.trainLoader.dataset)
+        avg_loss = total_loss / nBatches
+        #avg_loss = total_loss / len(self.trainLoader.dataset)
 
         if self.DDP_enabled:
             if self.enable_profile:
@@ -412,7 +412,8 @@ class FourierNeuralOperator:
         # batchSize = self.valLoader.batch_size
         total_loss = 0.0
         relative_error = 0.0
-        median_error = torch.zeros(len(self.valLoader.dataset))
+        #median_error = torch.zeros(len(self.valLoader.dataset))
+        local_errors = torch.zeros(nBatches)
         data_iter = iter(self.valLoader)
 
         if self.dataClass == 'rbc':
@@ -450,30 +451,44 @@ class FourierNeuralOperator:
                 error = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))/torch.mean(torch.abs(ref.flatten(start_dim=1))) * 100
                 total_loss += loss.item()
                 relative_error += error.item()
-                median_error[iBatch] = error.item()
+                local_errors[iBatch] = error.item()
                 # if self.enable_profile:
                 #     nvtx.range_pop() # end loss
                 #     nvtx.range_pop() # end batch
                 if self.enable_profile:
                     nvtx.range_pop() # end forward
 
-        #avg_loss = total_loss / nBatches
-        avg_loss = total_loss / len(self.valLoader.dataset)
-        relative_error = relative_error / len(self.valLoader.dataset)
+        avg_loss = total_loss / nBatches
+        relative_error = relative_error / nBatches
+        #avg_loss = total_loss / len(self.valLoader.dataset)
+        #relative_error = relative_error / len(self.valLoader.dataset)
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
             ddp_loss = torch.Tensor([avg_loss]).to(self.device).clone()
+            ddp_rel_error = torch.Tensor([relative_error]).to(self.device).clone()
             self.communicator.allreduce(ddp_loss,op=dist.ReduceOp.AVG)
+            self.communicator.allreduce(ddp_rel_error,op=dist.ReduceOp.AVG)
             val_loss = ddp_loss.item()
+            val_error = ddp_rel_error.item()
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            local_errors = local_errors.to(self.device)
+            out = torch.empty(world_size * local_errors.numel(),
+                                       device=self.device,
+                                       dtype=local_errors.dtype)
+            self.communicator.allgather(out,local_errors)
+            median_error = out.median().item()
             if self.enable_profile:
                 nvtx.range_pop() # end ddploss
         else:
             val_loss = avg_loss
+            val_error = relative_error
+            median_error = local_errors.median().item()
 
         self.losses["model"]["valid"] = val_loss
-        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.4e} Test Error={relative_error:.2f}% Median Test Error={torch.median(median_error).item():.4f}% (id: {idLoss:>7f})\n")
+        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.4e} Test Error={val_error:.2f}% Median Test Error={median_error:.4f}% (id: {idLoss:>7f})\n")
 
     def learn(self, nEpoch, save_interval=100):
         self.epochs += 1

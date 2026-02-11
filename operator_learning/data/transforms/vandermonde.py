@@ -24,8 +24,11 @@ class VandermondeTransform:
             self.X_ = torch.cat((torch.arange(kX, dtype=dtype, device=device), 
                                  torch.arange(start=-(kX), end=0, dtype=dtype, device=device)), 
                                  0).repeat(self.batch_size, 1)[:,:,None]
+            #self.Y_ = torch.cat((torch.arange(kY,dtype=dtype, device=device),
+            #                     torch.arange(start=-(kY-1), end=0, dtype=dtype, device=device)),
+            #                     0).repeat(self.batch_size, 1)[:,:,None]
             self.Y_ = torch.cat((torch.arange(kY,dtype=dtype, device=device),
-                                 torch.arange(start=-(kY-1), end=0, dtype=dtype, device=device)),
+                                 torch.arange(start=-(kY), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None]
             self.Vt, self.Vc = self.make_2Dmatrix()
             
@@ -36,19 +39,23 @@ class VandermondeTransform:
             for row in range(self.kX):
                 forward_mat[:, row, :] = torch.exp(-1j * (row - int(self.kX/2))* self.positions[:, :])
 
-            inverse_mat = torch.conj(forward_mat.clone()).permute(0,2,1)
+            #inverse_mat = torch.conj(forward_mat.clone()).permute(0,2,1)
+            inverse_mat = torch.conj(forward_mat).permute(0,2,1)
 
         return forward_mat, inverse_mat
     
     def make_2Dmatrix(self):
         
         with torch.no_grad():
-            m = (self.kX*2)*(self.kY*2-1)
-            X_mat = torch.bmm(self.X_, self.x_positions[:,None,:]).repeat(1, (self.kY*2-1), 1).to(self.device)
+            #m = (self.kX*2)*(self.kY*2-1)
+            m = (self.kX*2)*(self.kY*2)
+            #X_mat = torch.bmm(self.X_, self.x_positions[:,None,:]).repeat(1, (self.kY*2-1), 1).to(self.device)
+            X_mat = torch.bmm(self.X_, self.x_positions[:,None,:]).repeat(1, self.kY*2, 1).to(self.device)
             Y_mat = (torch.bmm(self.Y_, self.y_positions[:,None,:]).repeat(1, 1, self.kX*2).reshape(self.batch_size,m,self.number_points)).to(self.device)
             
             forward_mat = torch.exp(-1j* (X_mat+Y_mat)).to(dtype=torch.cfloat, device=self.device) # [batchsize, m, nParticles]
-            inverse_mat = torch.conj(forward_mat.clone()).permute(0,2,1)
+            #inverse_mat = torch.conj(forward_mat.clone()).permute(0,2,1)
+            inverse_mat = torch.conj(forward_mat).permute(0,2,1)
 
         return forward_mat, inverse_mat
     
