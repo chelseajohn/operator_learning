@@ -91,7 +91,7 @@ def getDataLoaders(dataFile,
     else:
         nBatches = len(dataset)
         collate_fn = None
-        num_workers = 4
+        num_workers = 1
 
     trainSize = int(trainRatio*nBatches)
     valSize = nBatches - trainSize

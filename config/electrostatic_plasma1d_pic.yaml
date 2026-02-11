@@ -58,7 +58,9 @@ loss:
   # absolute: false
   
 parallel_strategy:
-  ddp: false                    # Distributed Data Parallel
+  ddp: true      # Distributed Data Parallel
+  tp : true      # Tensor Parallel(Only for PIC-DSE)
+  tp_size: 2     # must be divisible by nParticle          
   gpus_per_node: 4
 
 train:
