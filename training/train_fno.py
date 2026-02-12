@@ -95,6 +95,7 @@ class FourierNeuralOperator:
                 self.device = self.communicator.device
                 self.rank = self.communicator.rank
                 self.local_rank = self.communicator.local_rank
+                self.dp_size = self.world_size
                 
             if self.TP_enabled:
                 self.tp_size = parallel_strategy["tp_size"] if "tp_size" in parallel_strategy else 2
@@ -103,6 +104,7 @@ class FourierNeuralOperator:
                     ), f"World size {self.world_size} needs to be divisible by TP size {self.tp_size}"
             else:
                 self.tp_size = 1
+                self.tp_mesh = None
             
             if self.DDP_enabled and self.TP_enabled:
                 self.dp_size = self.world_size // self.tp_size
@@ -122,9 +124,14 @@ class FourierNeuralOperator:
                                                 )
                 self.tp_mesh = self.device_mesh["tp"]
                 self.tp_rank = self.tp_mesh.get_rank()
+                self.dp_size = 1
+            
+            print_rank0(f'Using DDP with {self.dp_size} GPUs and Tensor Parallel with {self.tp_size} GPUs.')
         else:
             self.DDP_enabled = False
             self.TP_enabled = False
+            self.tp_mesh = None
+            self.tp_size = 1
 
         # Evaluation-only mode
         if eval_only:
@@ -198,7 +205,8 @@ class FourierNeuralOperator:
     # -------------------------------------------------------------------------
     def setupModel(self, model_config):
         self.model = FNO(**model_config, dataset=self.dataset, dataClass=self.dataClass,\
-                          use_complex_amp=self.use_complex_amp, device=self.device).to(self.device)
+                          use_complex_amp=self.use_complex_amp, device=self.device, device_mesh=self.tp_mesh).to(self.device)
+
         # hooks = register_dtype_hooks(self.model)
         self.modelConfig = model_config.copy()
         print_rank0(self.modelConfig)
@@ -333,8 +341,8 @@ class FourierNeuralOperator:
                 if self.enable_profile:
                     nvtx.range_push("forward")
                 pred = model(inp)
-                if iBatch == 0:
-                    print_rank0(f'Shape of input: {inp.shape} and shape of ouput: {pred.shape}')
+                if iBatch == 0 and self.epochs == 1:
+                    print_rank0(f'Shape of input/GPU: {inp.shape} and shape of ouput/GPU: {pred.shape}')
                 if self.enable_profile:
                     nvtx.range_pop()   # end forward
 
@@ -351,7 +359,7 @@ class FourierNeuralOperator:
                     # if iBatch % 10 == 0:
                     #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {local_loss/self.tp_size}\n")
              
-            total_loss += loss.item()
+            total_loss += loss.detach()
            
             optimizer.zero_grad()
             if self.debug:
@@ -371,12 +379,12 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 nvtx.range_pop()  # end backward
 
-            if self.TP_enabled:
-                # allreduce tp gradients
-                for param in model.parameters():
-                    if param.grad is not None:
-                        torch.distributed.all_reduce(param.grad, group=self.tp_mesh.get_group())
-                        param.grad /= self.tp_size
+            # if self.TP_enabled:
+            #     # allreduce tp gradients
+            #     for param in model.parameters():
+            #         if param.grad is not None:
+            #             torch.distributed.all_reduce(param.grad, group=self.tp_mesh.get_group())
+            #             param.grad /= self.tp_size
     
             if self.debug:
                 any_grad_nonzero = False
@@ -450,14 +458,11 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 nvtx.range_push(f"TrainEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
-            ddp_loss = torch.Tensor([avg_loss]).to(self.device).clone()
-            self.communicator.allreduce(ddp_loss,op=dist.ReduceOp.AVG)
-            train_loss = ddp_loss.item()/self.tp_size  # loss per gpu
+            self.communicator.allreduce(avg_loss,op=dist.ReduceOp.AVG)
             if self.enable_profile:
                 nvtx.range_pop()  # end ddploss
-        else:
-            train_loss = avg_loss
-
+        
+        train_loss = avg_loss.item()/self.tp_size  # loss per gpu
         self.losses["model"]["train"] = train_loss
         self.gradientNormEpoch = gradsEpoch / nBatches
         print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.6f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
@@ -540,8 +545,8 @@ class FourierNeuralOperator:
                 else:
                     loss = local_loss
                     error = local_error
-                total_loss += loss.item()
-                relative_error += error.item()
+                total_loss += loss.detach()
+                relative_error += error.detach()
                 # if self.enable_profile:
                 #     nvtx.range_pop() # end loss
                 #     nvtx.range_pop() # end batch
@@ -555,14 +560,11 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
-            ddp_loss = torch.Tensor([avg_loss]).to(self.device).clone()
-            self.communicator.allreduce(ddp_loss,op=dist.ReduceOp.AVG)
-            val_loss = ddp_loss.item()/self.tp_size # loss per gpu
+            self.communicator.allreduce(avg_loss,op=dist.ReduceOp.AVG)
             if self.enable_profile:
                 nvtx.range_pop() # end ddploss
-        else:
-            val_loss = avg_loss
-
+      
+        val_loss = avg_loss.item()/self.tp_size # loss per gpu
         self.losses["model"]["valid"] = val_loss
         print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.6f} Test Error={relative_error:.2f} (id: {idLoss:>7f})\n")
 

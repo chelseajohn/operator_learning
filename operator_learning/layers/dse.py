@@ -10,7 +10,7 @@ from .mlp import MLP
 
 class SpectralConv_dse(nn.Module):
     def __init__(self, dv, kX, kY=None, dataClass='pic', bias=False, 
-                 dim=1, use_complex_amp=False):
+                 dim=1, use_complex_amp=False, device_mesh=None):
         super().__init__()
         assert dim in (1,2), "implemented only for PIC1D and PIC2D"
         self.dim = dim
@@ -19,6 +19,11 @@ class SpectralConv_dse(nn.Module):
         self.channel = dv
         self.use_complex_amp = use_complex_amp
         self.scale = 1 / (dv * dv)
+        self.device_mesh = device_mesh
+        if device_mesh is not None and "tp" in device_mesh.mesh_dim_names:
+            self.TP_enabled = True
+        else:
+            self.TP_enabled = False
       
         # self.kX_sym = int(kX/2) + 1
         # self.kX_sym = int(kX/2)
@@ -83,6 +88,12 @@ class SpectralConv_dse(nn.Module):
         # Fourier coeffs (complex)
         x_ft = transform.forward(x.to(dtype))  # [batchsize, dv, modes]
 
+
+        if self.TP_enabled:
+            torch.distributed.all_reduce(x_ft, group=self.device_mesh.get_group())
+            torch.cuda.synchronize()
+    
+
         if self.dim == 1:
             out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, kX]
         else:
@@ -128,6 +139,7 @@ class DSELayer(nn.Module):
                  bias=False,
                  dim=1,
                  use_complex_amp=False,
+                 device_mesh=None,
                  ):
         super().__init__()
 
@@ -136,8 +148,9 @@ class DSELayer(nn.Module):
             self.sigma = nn.functional.gelu
         else:
             self.sigma = nn.ReLU(inplace=True)
-
-        self.conv = SpectralConv_dse(dv, kX, kY, dataClass, bias, dim, use_complex_amp)
+        
+        self.device_mesh = device_mesh
+        self.conv = SpectralConv_dse(dv, kX, kY, dataClass, bias, dim, use_complex_amp, device_mesh)
     
         # self.W = GridLinear(
         #                inSize=dv, outSize=dv, hiddenSize=None,

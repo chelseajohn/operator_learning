@@ -133,6 +133,7 @@ class FNO(nn.Module):
         self.dataClass = dataClass
         self.dataset = dataset if dataClass == 'rbc' else None
         self.data_type = torch.float16 if use_complex_amp and self.training else torch.float32
+        self.device_mesh = kwargs.get("device_mesh", None)
 
         if use_dse:
             self.layers = nn.ModuleList(
@@ -142,6 +143,7 @@ class FNO(nn.Module):
                           bias=bias,
                           dim=n_dims,
                           use_complex_amp=use_complex_amp,
+                          device_mesh=self.device_mesh,
                          )
                  for _ in range(n_layers)])
         # elif use_toeplitz:
