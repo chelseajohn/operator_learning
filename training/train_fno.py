@@ -130,8 +130,8 @@ class FourierNeuralOperator:
         else:
             self.DDP_enabled = False
             self.TP_enabled = False
-            self.tp_mesh = None
-            self.tp_size = 1
+            self.device_mesh = None
+
 
         # Evaluation-only mode
         if eval_only:
@@ -171,8 +171,6 @@ class FourierNeuralOperator:
         if loss_class is None:
             raise NotImplementedError(f"Unknown loss type, available are {list(LOSSES_CLASSES.keys())}")
 
-        # if "grids" in loss:
-        #     loss["grids"] = self.dataset.grid
         self.lossFunction = loss_class(**self.loss_config, device=self.device)
 
         # Loss tracking
@@ -204,8 +202,9 @@ class FourierNeuralOperator:
     # Setup and utility methods
     # -------------------------------------------------------------------------
     def setupModel(self, model_config):
+        mesh = self.tp_mesh if self.TP_enabled else None
         self.model = FNO(**model_config, dataset=self.dataset, dataClass=self.dataClass,\
-                          use_complex_amp=self.use_complex_amp, device=self.device, device_mesh=self.tp_mesh).to(self.device)
+                          use_complex_amp=self.use_complex_amp, device=self.device, device_mesh=mesh).to(self.device)
 
         # hooks = register_dtype_hooks(self.model)
         self.modelConfig = model_config.copy()
@@ -214,11 +213,11 @@ class FourierNeuralOperator:
         print_rank0(model_df)
         if self.DDP_enabled:
             if self.TP_enabled:
-                dp_group = self.dp_mesh.get_group()
+                self.dp_group = self.dp_mesh.get_group()
             else:
-                dp_group = None
+                self.dp_group = None
             self.model = DDP(self.model, device_ids=[self.local_rank],
-                             process_group=dp_group,
+                             process_group=self.dp_group,
                              broadcast_buffers=False)
         torch.cuda.empty_cache()
 
@@ -351,20 +350,18 @@ class FourierNeuralOperator:
                 loss = self.lossFunction(pred, ref)
                 if self.enable_profile:
                     nvtx.range_pop() # end loss
-            
-                if self.TP_enabled:
-                    local_loss = loss.detach()
-                    torch.distributed.all_reduce(local_loss, 
-                                                  group=self.tp_mesh.get_group())
-                    # if iBatch % 10 == 0:
-                    #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {local_loss/self.tp_size}\n")
-             
-            total_loss += loss.detach()
-           
+
+            if self.TP_enabled:
+                # All-reduce for logging (detached, outside graph)
+                tensor_loss = loss.detach().clone()
+                dist.all_reduce(tensor_loss, op=dist.ReduceOp.AVG, group=self.tp_mesh.get_group())
+                total_loss += tensor_loss
+                # if iBatch % 10 == 0:
+                #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {tensor_loss}\n")
+            else:
+                total_loss += loss.detach()    
+                        
             optimizer.zero_grad()
-            if self.debug:
-                print_rank0(f"[DEBUG] batch loss: {loss.item():.6e}, pred min/max: {pred.min().item():.6e}/{pred.max().item():.6e}, \
-                             ref min/max: {ref.min().item():.6e}/{ref.max().item():.6e}")
 
             if self.benchmark and iBatch % 10 == 0:
                 allocated = torch.cuda.memory_allocated() / (1024 ** 2)  # MB
@@ -383,7 +380,7 @@ class FourierNeuralOperator:
             #     # allreduce tp gradients
             #     for param in model.parameters():
             #         if param.grad is not None:
-            #             torch.distributed.all_reduce(param.grad, group=self.tp_mesh.get_group())
+            #             dist.all_reduce(param.grad, group=self.tp_mesh.get_group())
             #             param.grad /= self.tp_size
     
             if self.debug:
@@ -452,17 +449,18 @@ class FourierNeuralOperator:
 
         scheduler_step(scheduler)
         avg_loss = total_loss / nBatches
-        # avg_loss = total_loss / len(self.trainLoader.dataset)
 
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"TrainEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
-            self.communicator.allreduce(avg_loss,op=dist.ReduceOp.AVG)
+            dist.all_reduce(avg_loss, 
+                            op=dist.ReduceOp.AVG, 
+                            group=self.dp_group)
             if self.enable_profile:
                 nvtx.range_pop()  # end ddploss
         
-        train_loss = avg_loss.item()/self.tp_size  # loss per gpu
+        train_loss = avg_loss.item()  # loss per gpu
         self.losses["model"]["train"] = train_loss
         self.gradientNormEpoch = gradsEpoch / nBatches
         print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.6f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
@@ -534,37 +532,42 @@ class FourierNeuralOperator:
                 local_loss = self.lossFunction(pred,ref)
                 local_error = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))/torch.mean(torch.abs(ref.flatten(start_dim=1))) * 100
                 if self.TP_enabled:
-                    torch.distributed.all_reduce(local_loss, 
-                                                  group=self.tp_mesh.get_group())
-                    torch.distributed.all_reduce(local_error,
-                                                 group=self.tp_mesh.get_group())
-                    loss = local_loss
-                    error = local_error
+                    loss_tensor = local_loss.detach().clone()
+                    dist.all_reduce(loss_tensor, 
+                                    op=dist.ReduceOp.AVG,
+                                    group=self.tp_mesh.get_group())
+                    total_loss += loss_tensor
+
+                    error_tensor = local_error.detach().clone()
+                    dist.all_reduce(error_tensor,
+                                    op=dist.ReduceOp.AVG,
+                                    group=self.tp_mesh.get_group())
+                    relative_error += error_tensor
                     # if iBatch % 10 == 0:
-                    #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {local_loss/self.tp_size} tp_error: {local_error/self.tp_size}\n")
+                    #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {loss_tensor} tp_error: {error_tensor}\n")
                 else:
-                    loss = local_loss
-                    error = local_error
-                total_loss += loss.detach()
-                relative_error += error.detach()
+                    total_loss += local_loss.detach()
+                    relative_error += local_error.detach()
                 # if self.enable_profile:
                 #     nvtx.range_pop() # end loss
                 #     nvtx.range_pop() # end batch
                 if self.enable_profile:
                     nvtx.range_pop() # end forward
 
-        avg_loss = total_loss / nBatches
-        # avg_loss = total_loss / len(self.valLoader.dataset)
+        avg_loss = total_loss/nBatches
         relative_error = relative_error / len(self.valLoader.dataset)
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
-            self.communicator.allreduce(avg_loss,op=dist.ReduceOp.AVG)
+            dist.all_reduce(avg_loss, 
+                            op=dist.ReduceOp.AVG, 
+                            group=self.dp_group)
+  
             if self.enable_profile:
                 nvtx.range_pop() # end ddploss
       
-        val_loss = avg_loss.item()/self.tp_size # loss per gpu
+        val_loss = avg_loss.item() # loss per gpu
         self.losses["model"]["valid"] = val_loss
         print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.6f} Test Error={relative_error:.2f} (id: {idLoss:>7f})\n")
 

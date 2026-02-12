@@ -91,9 +91,7 @@ class SpectralConv_dse(nn.Module):
 
         if self.TP_enabled:
             torch.distributed.all_reduce(x_ft, group=self.device_mesh.get_group())
-            torch.cuda.synchronize()
     
-
         if self.dim == 1:
             out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, kX]
         else:
