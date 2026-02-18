@@ -114,13 +114,15 @@ else:
     EpRef = None
     ERef = None
     pRef = None
+    ExpRef = None
+    EypRef = None
     timeRef = None
     phase_spaceRef = None
     growth_rateRef = None
     speedup = 1
 
 #growth_rate = vis.twoStreamIppl(ExRef=ERef, ExPred=EPred)  
-energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EkPred=EkPred, EpRef=EpRef, EpPred=EpPred)
+energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EpRef=EpRef, EkPred=EkPred, EpPred=EpPred)
 conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
 if dim == 1:
     landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, label='strong')

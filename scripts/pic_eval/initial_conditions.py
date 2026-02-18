@@ -6,6 +6,7 @@ from pathlib import Path
 base_path = Path(__file__).resolve().parents[1]
 sys.path.append(str(base_path))
 import numpy as np
+import cupy as cp
 
 def f(x: float, alpha: float, kd: float, u: float) -> float:
     """
@@ -146,3 +147,89 @@ def findsource():
         None: No source term is implemented.
     """
     return None
+
+
+def inv_trans_sampling_gpu(alpha, k, L, N, dim=1,
+                           max_iter=12, tol=1e-12,
+                           dtype=cp.float64,
+                           out_dtype=cp.float64,
+                           label='weakLandau'):
+    """
+    GPU inverse-transform sampling for initial condition generation.
+
+    Returns:
+        XP: shape (dim, N)
+        VP: shape (dim, N)
+    """
+
+    # uniform u in [0, L_d)
+    U0 = cp.random.rand(dim, N, dtype=dtype)
+    Larr = cp.asarray(L, dtype=dtype).reshape(dim, 1)
+    U = U0 * Larr
+    if((label == 'weakLandau') or (label == 'strongLandau')): 
+        # velocities: Maxwellian
+        VP = cp.random.randn(dim, N, dtype=dtype)
+
+
+        # initial guess
+        X = U / (1.0 + alpha)
+
+        # reshape k to (dim,1) for broadcasting
+        karr = cp.asarray(k, dtype=dtype).reshape(dim, 1)
+
+        # Newton iteration (vectorized over ALL particles)
+        for _ in range(max_iter):
+            f  = X + alpha * (cp.sin(karr * X) / karr) - U
+            fp = 1.0 + alpha * cp.cos(karr * X)
+
+            dX = f / fp
+            Xnew = X - dX
+
+            # global convergence check
+            if cp.max(cp.abs(dX)) < tol:
+                X = Xnew
+                break
+
+            X = Xnew
+    elif((label == 'tsi') or (label == 'bti')):
+        # uniform u in [0, L_d)
+        X = U.copy()
+        # initial guess
+        X[1] = U[1] / (1.0 + alpha)
+
+        # reshape k to (dim,1) for broadcasting
+        karr = cp.asarray(k, dtype=dtype).reshape(dim, 1)
+
+        # Newton iteration (vectorized over ALL particles)
+        for _ in range(max_iter):
+            f  = X[1] + alpha * (cp.sin(karr[1] * X[1]) / karr[1]) - U[1]
+            fp = 1.0 + alpha * cp.cos(karr[1] * X[1])
+
+            dY = f / fp
+            Ynew = X[1] - dY
+
+            # global convergence check
+            if cp.max(cp.abs(dY)) < tol:
+                X[1] = Ynew
+                break
+
+            X[1] = Ynew
+
+        VP = cp.zeros([dim, N])
+        VP[0] = cp.random.randn(1, N)
+        if(label == 'tsi'):
+            Nhalf = int(N/2)
+            VP[1,:Nhalf] = -cp.pi/2.0 + 0.1 * cp.random.randn(Nhalf)
+            VP[1,Nhalf:] =  cp.pi/2.0 + 0.1 * cp.random.randn(Nhalf)
+        elif(label=='bti'):
+            sigma = 1 / cp.sqrt(2)
+            ninetypercent = int(0.9*N)
+            rem = N - ninetypercent
+            VP[1,:ninetypercent] = sigma * cp.random.randn(ninetypercent)
+            VP[1,ninetypercent:] =  4.0 + sigma * cp.random.randn(rem)
+
+
+    # periodic wrap to [0,L)
+    XP = cp.mod(X, Larr)
+
+    return XP.astype(out_dtype), VP.astype(out_dtype)

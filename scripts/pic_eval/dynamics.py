@@ -139,12 +139,11 @@ def toPeriodic(x: cp.ndarray, L: float, discrete: bool=False):
     x[out] = x[out] - L
     return x
 
-def toPeriodicND(x: cp.ndarray, L: float, dim :int=2, discrete: bool=False):
+def toPeriodicNDOld(x: cp.ndarray, L: float, dim :int=2):
     for i in range(dim):
-        x[:,i] = toPeriodic(x[:,i], L[i], discrete)
+        x[i] = toPeriodic(x[i], L[i])
     return x
 
-def toPeriodicNDTranspose(x: cp.ndarray, L: float, dim :int=2, discrete: bool=False):
-    for i in range(dim):
-        x[i] = toPeriodic(x[i], L[i], discrete)
+def toPeriodicND(x: cp.ndarray, L: float, dim :int=2):
+    x = cp.mod(x, cp.asarray(L)[:, None])
     return x
