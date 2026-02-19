@@ -146,11 +146,12 @@ def scatterFourier(XP, SHat, NG, N, Q, L, dim, wp=1):
 
 
 def gatherFourier(XP, EHat, SHat, QM, L, dim, wp=1):
-    coeff1 = EHat[0] * SHat
     if dim == 1:
+        coeff1 = EHat * SHat
         Ep = cp.real(cufinufft.nufft1d2(XP[0] * 2 * cp.pi / L[0], coeff1, eps=1e-12, isign=1, modeord=1))
         a = (QM / wp) * Ep
     else:
+        coeff1 = EHat[0] * SHat
         Exp = cp.real(cufinufft.nufft2d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], coeff1, eps=1e-12, isign=1, modeord=1))
         coeff2 = EHat[1] * SHat
         Eyp = cp.real(cufinufft.nufft2d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], coeff2, eps=1e-12, isign=1, modeord=1))
@@ -217,7 +218,7 @@ def p2g_g2p_nostencil_arrays(XP, DX, NG, L, dim,
     elif dim == 2:
         x = XP[0,:]
         y = XP[1,:]
-        NGx, NGy = int(NG[0]), int(NG[1])
+        NGx, NGy = int(NG), int(NG)
         dx, dy = float(DX[0]), float(DX[1])
 
         gx0 = cp.floor(x / dx).astype(cp.int32)

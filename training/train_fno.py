@@ -460,8 +460,6 @@ class FourierNeuralOperator:
 
         avg_loss = total_loss / nBatches
         relative_error = relative_error / nBatches
-        #avg_loss = total_loss / len(self.valLoader.dataset)
-        #relative_error = relative_error / len(self.valLoader.dataset)
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")

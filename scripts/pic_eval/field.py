@@ -31,8 +31,8 @@ def fieldInFourier(rhoHat: cp.ndarray, L: cp.ndarray, dim: int) -> tuple[cp.ndar
         N = rhoHat.size
         Ka = cp.arange(1, N // 2)                # 1,2,...,(N/2 - 1)
         Kb = Ka[::-1]                            # reversed
-        #breakpoint()
         K = cp.append(cp.append(Ka, [rhoHat.size // 2]), - Kb)
+        rhoHat  = cp.squeeze(rhoHat)
         phiHat = cp.append([0], rhoHat[1:] * (L / (2 * cp.pi * K)) ** 2)
         EHat = cp.append([0], rhoHat[1:] * L / (2j * cp.pi * K))
         EHat[N // 2] = 0

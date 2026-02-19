@@ -254,11 +254,11 @@ class PICVisualizer:
                 t0 = time.time()
                 if(self.ref == 'pic'):
                     # Interpolation: particle -> grid
-                    rho, _, _ = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=(self.NG,self.NG), L=self.Ln, dim=self.dim, Q=self.Q, rho_back=self.rho_back)
+                    rho, _, _ = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=self.NG, L=self.Ln, dim=self.dim, Q=self.Q, rho_back=self.rho_back)
                     # Compute fields
                     phi, Eg = field(rho=rho, L=self.Ln, dim=self.dim)
                     # Interpolation: grid -> particle
-                    _, Efieldparticle, a = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=(self.NG,self.NG), L=self.Ln, dim=self.dim, E=Eg, QM=self.QM)
+                    _, Efieldparticle, a = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=self.NG, L=self.Ln, dim=self.dim, E=Eg, QM=self.QM)
                 elif(self.ref == 'pif'):
                     # Interpolation: particle -> Fourier space
                     rhoHat = scatterFourier(XP=xp, SHat=SHat, NG=self.NG, N=self.N, Q=self.Q, L=self.Ln, dim=self.dim)
@@ -436,10 +436,16 @@ class PICVisualizer:
         plt.xlabel(r'$\omega_p t$')
         plt.legend()
         plt.grid(True)
-        if(label == 'strongLandau'):
-            plt.ylim(1e-3,1e2)
-        if(label == 'weakLandau'):
-            plt.ylim(1e-3,1)
+        if(self.dim == 1):
+            if(label == 'strongLandau'):
+                plt.ylim(1e-5,10)
+            if(label == 'weakLandau'):
+                plt.ylim(1e-5,1e-1)
+        else:
+            if(label == 'strongLandau'):
+                plt.ylim(1e-3,1e2)
+            if(label == 'weakLandau'):
+                plt.ylim(1e-3,1)
         plt.tight_layout()
         plt.savefig(f"{self.eval_dir}/{filename}", dpi=200)
         plt.clf()
@@ -533,10 +539,16 @@ class PICVisualizer:
             plt.plot(a, EyPred, label=r'$\int EPred_y^2 dV$', color='orange', linestyle="--")
         plt.yscale('log')
         ax = plt.gca()
-        if(label == 'tsi'):
-            ax.set_ylim([1e-4,1e3])
+        if(self.dim == 1):
+            if(label == 'tsi'):
+                ax.set_ylim([1e-4,1e2])
+            else:
+                ax.set_ylim([1e-4,1e1])
         else:
-            ax.set_ylim([1e-2,1e3])
+            if(label == 'tsi'):
+                ax.set_ylim([1e-4,1e3])
+            else:
+                ax.set_ylim([1e-2,1e3])
         plt.ylabel(r'$\int E_x^2 dV$, $\int E_y^2 dV$')
         plt.xlabel(r'normalized time unit: $\omega_p$t', fontsize='14')
         plt.legend()
