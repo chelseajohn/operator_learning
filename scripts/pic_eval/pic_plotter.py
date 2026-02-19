@@ -10,11 +10,12 @@ import matplotlib.pyplot as plt
 import h5py
 from initial_conditions import InvTransSampling, inv_trans_sampling_gpu
 from dynamics import toPeriodic, accelerate, accelerateML, move, push, toPeriodicND, toPeriodicNDOld
-from field import field
-from interpolation import interpMatrix, interpolate, p2g_g2p_nostencil_arrays
+from field import field, fieldInFourier
+from interpolation import interpMatrix, interpolate, p2g_g2p_nostencil_arrays, scatterFourier, gatherFourier
 from landau_decay import period, decayRate
 from energy import potential
 from operator_learning.data.pic_dataset import normalize_per_sample
+from specKernel import specKernel
 
 class PICVisualizer:
     def __init__(self, args):
@@ -35,6 +36,7 @@ class PICVisualizer:
         self.NT = int(self.T/self.DT) 
         self.times = np.linspace(0, self.NT * self.DT, self.NT)   # number of time steps
         self.dim = args.dim
+        self.ref = args.ref
         if self.dim == 1:
             self.k = np.array([args.kc])
         else:
@@ -74,32 +76,6 @@ class PICVisualizer:
         return filename
 
     def pic1D(self, ml_acc: bool = False, model = None, data_file = None):
-        """
-        Run a 1D Particle-In-Cell (PIC) simulation.
-
-        Args:
-            ml_acc (bool, optional): If True, use machine-learning-based acceleration
-                                    instead of the standard PIC acceleration. Default is False.
-            model: FNO model Class
-
-        Returns:
-            tuple: (xp, vp, wp, E, Ek, Ep, momentum, Exp) where
-                xp (cp.ndarray): Final particle positions (shape: [N]).
-                vp (cp.ndarray): Final particle velocities (shape: [N]).
-                wp (float or cp.ndarray): Particle weights.
-                E (list[float]): Total energy per time step.
-                Ek (list[float]): Kinetic energy per time step.
-                Ep (list[float]): Potential energy per time step.
-                momentum (list[float]): Total momentum per time step.
-                Exp (list[float]): Electric field energy per time step.
-
-        Notes:
-            - Initializes particle positions using inverse transform sampling.
-            - Uses quadratic interpolation to project particle charges to the grid.
-            - Solves 1D Poisson equation to compute electric potential and field.
-            - Updates particle velocities and positions using standard or ML acceleration.
-            - Computes kinetic, potential, and field energies, as well as momentum conservation.
-        """
         # Storage arrays
         #pos = cp.zeros([self.NT, self.N], dtype=cp.float32)
         #Eout = cp.zeros([self.NT, self.N], dtype=cp.float32)
@@ -191,20 +167,33 @@ class PICVisualizer:
 
         return xp, vp, wp, E, Ek, Ep, momentum, Exp, time_acc_mean
 
-    def pic2D(self, ml_acc: bool = False, model = None, data_file = None):
-        # Storage arrays
-        #pos = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
-        #Eout = cp.zeros([self.NT, self.N, 2], dtype=cp.float32)
-        #p = cp.arange(self.N, dtype=int)
-        # Build Q-charge  array
-        #charge = cp.full((1, 1, self.N), self.Q*self.N, dtype=cp.float32)
-        #charge = cp.full((1, 1, self.N), -(((4 * cp.pi)**2)*2.38), dtype=cp.float32)
-        #charge = cp.full((1, 1, 500000), self.Q*self.N, dtype=cp.float32)
+    def picND(self, ml_acc: bool = False, model = None, data_file = None):
+        """
+        Run a 1D/2D Particle-In-Cell (PIC) simulation.
 
-        # Initial particle positions and velocities
-        #xpn, vpn = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim)
-        #xpc, vpc = np.transpose(self.xp0), np.transpose(self.vp0)
-        #xp, vp = cp.asarray(self.xp0), cp.asarray(self.vp0)
+        Args:
+            ml_acc (bool, optional): If True, use machine-learning-based acceleration
+                                    instead of the standard PIC acceleration. Default is False.
+            model: FNO model Class
+
+        Returns:
+            tuple: (xp, vp, wp, E, Ek, Ep, momentum, Exp) where
+                xp (cp.ndarray): Final particle positions (shape: [dim,N]).
+                vp (cp.ndarray): Final particle velocities (shape: [dim,N]).
+                wp (float or cp.ndarray): Particle weights.
+                E (list[float]): Total energy per time step.
+                Ek (list[float]): Kinetic energy per time step.
+                Ep (list[float]): Potential energy per time step.
+                momentum (list[float]): Total momentum per time step.
+                Exp (list[float]): Electric field energy per time step.
+
+        Notes:
+            - Initializes particle positions using inverse transform sampling.
+            - Uses quadratic (pic) or spectral (pif) interpolation to project particle charges to the grid.
+            - Solves d-dimensional Poisson equation to compute electric potential and field.
+            - Updates particle velocities and positions using standard or ML acceleration.
+            - Computes kinetic, potential, and field energies, as well as momentum conservation.
+        """
         xp, vp = self.xp0.copy(), self.vp0.copy()
         wp = 1.0
 
@@ -215,93 +204,88 @@ class PICVisualizer:
             data_output_std = data['infos']['output_std'][()]
 
         # Energy and momentum tracking
-        Ek, Ep, Exp, Eyp, E, momentum = [], [], [], [], [], []
-         # Time tracking
+        Ek, Ep, Exp, E, momentum = [], [], [], [], []
+
+        if(self.dim == 1):
+            Eyp = None
+        else:
+            Eyp = []
+
+        # Time tracking
         times_acc = []
     
-        #pos_path = '/p/project1/hai_1073/muralikrishnan1/Datasets_2D_electrostatic_plasma/pos_strongLandau_500k.npy'
-        #eout_path = '/p/project1/hai_1073/muralikrishnan1/Datasets_2D_electrostatic_plasma/Eout_strongLandau_500k.npy'
-        #ss = 1
+        if(self.ref == 'pif'):
+            SHat = specKernel(NG=self.NG, L=self.Ln, dx=self.dxn, dim=self.dim)
+
         for it in range(self.NT):
            
             print(it)
-            xp = toPeriodicND(x=xp, L=self.Ln, dim=self.dim) # [particle, channel]
+            #Apply periodic BCs 
+            xp = toPeriodicND(x=xp, L=self.Ln, dim=self.dim)
             # Acceleration
             if ml_acc and model is not None:
                 t0 = time.time()
-                # Enforce periodic boundary conditions
-                # Stack pos and charge
-                #xt = cp.transpose(xp)  # [channel, particle]
-                #breakpoint()
-                #positions = xt[None, :, :]
-                #pos_full = np.load(pos_path)[it]
-                #true_efields = np.load(eout_path)[it]
-                #pos_ss = pos_full[::ss]
-                #positions = cp.asarray(pos_ss[None, :, :])
-                #positions = cp.swapaxes(positions, 1, 2)
-                #breakpoint()
-                #inputs = cp.concatenate([positions, charge], axis=1) # [batch=1, channel=3, particles]
-                inputs = xp[None, :, :].copy() # [batch=1, channel=3, particles]
+                inputs = xp[None, :, :].copy() # [batch=1, channel=dim, particles]
                 inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
-                inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
-                #breakpoint()
-                prediction = model(inputs) # [1, channel=2, particle]
-                #Efieldparticle = cp.swapaxes(prediction, 1, 2).squeeze()  # [particles, channel=2]
-                Efieldparticle = prediction.squeeze()  # [particles, channel=2]
-                #breakpoint()
-                Efieldparticle[0] = Efieldparticle[0] * data_output_std[0] + data_output_mean[0]
-                Efieldparticle[1] = Efieldparticle[1] * data_output_std[1] + data_output_mean[1]
-                #Scale to length and charge for the current problem
-                Efieldparticle[:,:] = Efieldparticle[:,:] * ((self.Q * self.N)/cp.sqrt(self.Ln[0] * self.Ln[1]))
-                #breakpoint()
-                Efieldparticle[0] = Efieldparticle[0] - ((1/self.N) * cp.sum(Efieldparticle[0]))
-                Efieldparticle[1] = Efieldparticle[1] - ((1/self.N) * cp.sum(Efieldparticle[1]))
-                #breakpoint()
-                #EfieldparticleRef = true_efields[::ss]
-                #output_filename = f"comparison_spatial_timestep_{it}.png"
-                #breakpoint()
-                #self.visualize_spatial_comparison(pos_ss, pos_ss, EfieldparticleRef, Efieldparticle.get(), it, output_filename)
-                #self.visualize_spatial_comparison(pos_ss, xp.get(), EfieldparticleRef, Efieldparticle.get(), it, output_filename)
+                
+                if(self.dim == 2):
+                    inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
+                
+                prediction = model(inputs) # [1, channel=dim, particles]
+                Efieldparticle = prediction.squeeze()
+                if(self.dim == 1):
+                    Efieldparticle = Efieldparticle * data_output_std + data_output_mean
+                    #Scale by normalization factor \alpha = Q_tot in 1D for the current problem
+                    Efieldparticle = Efieldparticle * ((self.Q * self.N))
+                    #Subtract volume average of electric field for periodic compatibility 
+                    Efieldparticle = Efieldparticle - ((1/self.N) * cp.sum(Efieldparticle))
+                else:
+                    Efieldparticle[0] = Efieldparticle[0] * data_output_std[0] + data_output_mean[0]
+                    Efieldparticle[1] = Efieldparticle[1] * data_output_std[1] + data_output_mean[1]
+                    #Scale by normalization factor \alpha = Q_tot / sqrt(L_x * L_y) in 2D for the current problem
+                    Efieldparticle[:,:] = Efieldparticle[:,:] * ((self.Q * self.N)/cp.sqrt(self.Ln[0] * self.Ln[1]))
+                    #Subtract volume average of electric field for periodic compatibility 
+                    Efieldparticle[0] = Efieldparticle[0] - ((1/self.N) * cp.sum(Efieldparticle[0]))
+                    Efieldparticle[1] = Efieldparticle[1] - ((1/self.N) * cp.sum(Efieldparticle[1]))
+                
                 a = accelerateML(E=Efieldparticle, wp=wp, QM=self.QM)
                 times_acc.append(time.time() - t0)
             else:
                 t0 = time.time()
-                # Interpolation: particle -> grid
-                #M = interpMatrix(XP=xpn, wp=1, DX=self.dxn, N=self.N, NG=self.NG, p=p, L=self.Ln, dim=self.dim)
-                #rho = interpolate(M=M, DX=self.dxn, L=self.Ln, NG=self.NG, Q=self.Q, rho_back=self.rho_back, dim=self.dim)
-                rho, _, _ = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=(self.NG,self.NG), L=self.Ln, dim=self.dim, Q=self.Q, rho_back=self.rho_back)
-                # Compute fields
-                phi, Eg = field(rho=rho, L=self.Ln, dim=self.dim)
-                #pos[it, :, :] = cp.transpose(xpn.astype(cp.float32))
-                #an, Eout = accelerate(M=M, E=Eg, Eout=Eout, wp=wp, QM=self.QM, it=it, dim=self.dim)
-                _, Efieldparticle, a = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=(self.NG,self.NG), L=self.Ln, dim=self.dim, E=Eg, QM=self.QM)
-                #an, Efieldparticle = accelerate(M=M, E=Eg, wp=wp, QM=self.QM, it=it, dim=self.dim)
-                #Efieldparticle = Eout[it,:,:].squeeze()
-                # Update velocities and kinetic energy
-                #vpn, kinetic = push(vp=vpn, a=an, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
-                ## Update positions and weights
-                #xpn, wp = move(xp=xpn, vp=vpn, wp=wp, DT=self.DT, L=self.Ln, it=it)
-                ##breakpoint()
-                #momx = cp.sum(self.Q * vpn[0,:] / self.QM)
-                #momy = cp.sum(self.Q * vpn[1,:] / self.QM)
-                ## Electric field energy
-                #Egpx = cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
-                #Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
-                ## Compute potential energy
-                #Epotential = cp.sum(Efieldparticle[0,:]**2 + Efieldparticle[1,:]**2) * 0.5 * (self.Ln[0] * self.Ln[1]) / self.N
+                if(self.ref == 'pic'):
+                    # Interpolation: particle -> grid
+                    rho, _, _ = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=(self.NG,self.NG), L=self.Ln, dim=self.dim, Q=self.Q, rho_back=self.rho_back)
+                    # Compute fields
+                    phi, Eg = field(rho=rho, L=self.Ln, dim=self.dim)
+                    # Interpolation: grid -> particle
+                    _, Efieldparticle, a = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=(self.NG,self.NG), L=self.Ln, dim=self.dim, E=Eg, QM=self.QM)
+                elif(self.ref == 'pif'):
+                    # Interpolation: particle -> Fourier space
+                    rhoHat = scatterFourier(XP=xp, SHat=SHat, NG=self.NG, N=self.N, Q=self.Q, L=self.Ln, dim=self.dim)
+                    # Compute fields in Fourier space
+                    phiHat, EHat = fieldInFourier(rhoHat=rhoHat, L=self.Ln, dim=self.dim) 
+                    # Interpolation fields (in Fourier space) -> particles
+                    Efieldparticle, a = gatherFourier(XP=xp, EHat=EHat, SHat=SHat, QM=self.QM, L=self.Ln, dim=self.dim) 
                 times_acc.append(time.time() - t0)
 
             vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
             # Update positions and weights
-            #breakpoint()
             xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.Ln, it=it)
-            momx = cp.sum(self.Q * vp[0] / self.QM)
-            momy = cp.sum(self.Q * vp[1] / self.QM)
-            # Electric field energy
-            Egpx = cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
-            Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
-            # Compute potential energy
-            Epotential = cp.sum(Efieldparticle[0,:]**2 + Efieldparticle[1,:]**2) * 0.5 * (self.Ln[0] * self.Ln[1]) / self.N
+            if(self.dim == 1):
+                mom = cp.abs(cp.sum(self.Q * vp / self.QM))
+                # Electric field energy
+                Egpx = cp.sum(Efieldparticle[:] ** 2) * self.Ln[0] / self.N
+                # Compute potential energy
+                Epotential = 0.5 * Egpx
+            else:
+                momx = cp.sum(self.Q * vp[0] / self.QM)
+                momy = cp.sum(self.Q * vp[1] / self.QM)
+                mom = cp.sqrt(momx**2 + momy**2)
+                # Electric field energy
+                Egpx = cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
+                Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
+                # Compute potential energy
+                Epotential = 0.5 * (Egpx + Egpy)
 
 
             
@@ -310,8 +294,9 @@ class PICVisualizer:
             Ep.append(Epotential.get())
             E.append((kinetic + Epotential).get())
             Exp.append(Egpx.get())
-            Eyp.append(Egpy.get())
-            momentum.append((cp.sqrt(momx**2 + momy**2)).get())
+            if(self.dim == 2):
+                Eyp.append(Egpy.get())
+            momentum.append(mom.get())
 
         time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
@@ -537,10 +522,10 @@ class PICVisualizer:
             gamma = 0.356
         ind = np.argmin(np.abs(a - 8.0))
         theo_ref = np.exp(gamma * a)
-        if Ey is not None:
-            theo_ref = (Ey[ind]/theo_ref[ind])*theo_ref
+        if Ex is not None:
+            theo_ref = (Ex[ind]/theo_ref[ind])*theo_ref
         else:
-            theo_ref = (EyPred[ind]/theo_ref[ind])*theo_ref
+            theo_ref = (ExPred[ind]/theo_ref[ind])*theo_ref
         plt.plot(a, theo_ref, label='predicted growth rate', color='seagreen')
         if ExPred is not None:
             plt.plot(a, ExPred, label=r'$\int EPred_x^2 dV$', color='blue', linestyle="--")

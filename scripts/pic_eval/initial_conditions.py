@@ -195,38 +195,39 @@ def inv_trans_sampling_gpu(alpha, k, L, N, dim=1,
         # uniform u in [0, L_d)
         X = U.copy()
         # initial guess
-        X[1] = U[1] / (1.0 + alpha)
+        X[0] = U[0] / (1.0 + alpha)
 
         # reshape k to (dim,1) for broadcasting
         karr = cp.asarray(k, dtype=dtype).reshape(dim, 1)
 
         # Newton iteration (vectorized over ALL particles)
         for _ in range(max_iter):
-            f  = X[1] + alpha * (cp.sin(karr[1] * X[1]) / karr[1]) - U[1]
-            fp = 1.0 + alpha * cp.cos(karr[1] * X[1])
+            f  = X[0] + alpha * (cp.sin(karr[0] * X[0]) / karr[0]) - U[0]
+            fp = 1.0 + alpha * cp.cos(karr[0] * X[0])
 
-            dY = f / fp
-            Ynew = X[1] - dY
+            dX = f / fp
+            Xnew = X[0] - dX
 
             # global convergence check
-            if cp.max(cp.abs(dY)) < tol:
-                X[1] = Ynew
+            if cp.max(cp.abs(dX)) < tol:
+                X[0] = Xnew
                 break
 
-            X[1] = Ynew
+            X[0] = Xnew
 
         VP = cp.zeros([dim, N])
-        VP[0] = cp.random.randn(1, N)
+        if(dim == 2):
+            VP[1] = cp.random.randn(1, N)
         if(label == 'tsi'):
             Nhalf = int(N/2)
-            VP[1,:Nhalf] = -cp.pi/2.0 + 0.1 * cp.random.randn(Nhalf)
-            VP[1,Nhalf:] =  cp.pi/2.0 + 0.1 * cp.random.randn(Nhalf)
+            VP[0,:Nhalf] = -cp.pi/2.0 + 0.1 * cp.random.randn(Nhalf)
+            VP[0,Nhalf:] =  cp.pi/2.0 + 0.1 * cp.random.randn(Nhalf)
         elif(label=='bti'):
             sigma = 1 / cp.sqrt(2)
             ninetypercent = int(0.9*N)
             rem = N - ninetypercent
-            VP[1,:ninetypercent] = sigma * cp.random.randn(ninetypercent)
-            VP[1,ninetypercent:] =  4.0 + sigma * cp.random.randn(rem)
+            VP[0,:ninetypercent] = sigma * cp.random.randn(ninetypercent)
+            VP[0,ninetypercent:] =  4.0 + sigma * cp.random.randn(rem)
 
 
     # periodic wrap to [0,L)

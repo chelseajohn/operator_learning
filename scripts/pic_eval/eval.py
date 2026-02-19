@@ -52,6 +52,8 @@ parser.add_argument(
 parser.add_argument(
     "--testCase", default="strongLandau", help="Choose the test case among weakLandau, strongLandau, tsi or bti")
 parser.add_argument(
+    "--ref", default="pic", help="Choose the reference numerical scheme pic or pif")
+parser.add_argument(
     "--config", default=None, help="configuration file")
 args = parser.parse_args()
 
@@ -81,13 +83,8 @@ vis = PICVisualizer(args)
 
 if checkpoint is not None:
     fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
-    if dim == 1:
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
-        #phase_spacePred = vis.phase_space(xp=posPred, vp=velPred, wp=wPred, ml_acc=True)
-        phase_spacePred = None
-    else:
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
-        phase_spacePred = None
+    posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, timePred = vis.picND(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
+    phase_spacePred = None
 
 else:
     EnergyPred = None
@@ -95,19 +92,16 @@ else:
     EpPred = None
     EPred = None
     pPred = None
+    ExpPred = None
+    EypPred = None
     timePred = None
     phase_spacePred = None
     growth_ratePred = None
     speedup = 1
 
 if predOnly is False:
-    if dim == 1:
-        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, timeRef = vis.pic1D(ml_acc=False)
-        #phase_spaceRef = vis.phase_space(xp=posRef, vp=velRef, wp=wRef, ml_acc=False)
-        phase_spaceRef = None
-    else:
-        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, EypRef, timeRef = vis.pic2D(ml_acc=False)
-        phase_spaceRef = None
+    posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, EypRef, timeRef = vis.picND(ml_acc=False)
+    phase_spaceRef = None
 else:
     EnergyRef = None
     EkRef = None
@@ -121,16 +115,12 @@ else:
     growth_rateRef = None
     speedup = 1
 
-#growth_rate = vis.twoStreamIppl(ExRef=ERef, ExPred=EPred)  
 energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EpRef=EpRef, EkPred=EkPred, EpPred=EpPred)
 conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
-if dim == 1:
-    landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, label='strong')
-else:
-    if ((testCase == "weakLandau") or (testCase == "strongLandau")):
-        landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
-    elif ((testCase == "tsi") or (testCase == "bti")):
-        growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
+if ((testCase == "weakLandau") or (testCase == "strongLandau")):
+    landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
+elif ((testCase == "tsi") or (testCase == "bti")):
+    growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
 
 HEADER = """
 # FNO evaluation for PIC in {dim}D on {device}
