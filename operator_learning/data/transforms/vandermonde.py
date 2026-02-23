@@ -54,7 +54,7 @@ class VandermondeTransform:
 
             # make grid: [B, 2kX, 2kY, N]
             phase = X[:, :, None, :] + Y[:, None, :, :]
-            #The following permutation is only needed for using old model weights where were trained with that
+            #The following permutation is only needed for using old model weights which were trained with that
             #convention. If we are training a new model from scratch then this is not needed. 
             phase = phase.permute(0, 2, 1, 3)              # [B, Ky, Kx, N]
 
