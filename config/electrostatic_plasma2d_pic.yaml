@@ -40,7 +40,7 @@ model:
   use_dse: true                        # Direct Spectral Evaluation
   use_kb: false                          # Kaiser-Bessel NUFFT
   use_toeplitz: false                   # Toeplitz NUFFT
-
+  matrix_free: false
 
 optim:
   name: adam
