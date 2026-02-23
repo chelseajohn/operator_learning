@@ -1,10 +1,12 @@
 import os
 import time
+import numpy as np
 from pathlib import Path
 from collections import OrderedDict
 from statistics import mean
 import torch
 import torch.distributed as dist
+import cupy as cp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 import torch.profiler as tprof
@@ -18,13 +20,13 @@ from operator_learning.utils.misc import register_dtype_hooks, enable_tf32_only_
 
 
 class FourierNeuralOperator:
-    
+
     TRAIN_DIR = None
     LOSSES_FILE = 'loss.txt'
     USE_TENSORBOARD = True
-    
 
-    def __init__(self, data:dict=None, model:dict=None, optim:dict=None, 
+
+    def __init__(self, data:dict=None, model:dict=None, optim:dict=None,
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
                 loss:dict=None, profile:dict=None, checkpoint=None,
                 eval_only=False, debug=False, device=None, benchmark=False, use_complex_amp=False,
@@ -49,12 +51,12 @@ class FourierNeuralOperator:
             self.autocast_device_type = self.device.type
         else:
             self.autocast_device_type = "cuda" if "cuda" in self.device else "cpu"
-       
+
         if use_amp:
             self.scaler = torch.amp.GradScaler(self.autocast_device_type, enabled=use_amp)
         else:
             self.scaler = NoScale()
-        
+
         if profile is not None:
             self.enable_profile = profile['enableProfiler']
             self.profiler_type = profile['profiler']
@@ -83,7 +85,7 @@ class FourierNeuralOperator:
         if parallel_strategy is not None:
             gpus_per_node = parallel_strategy["gpus_per_node"] if "gpus_per_node" in parallel_strategy else 4
             self.DDP_enabled = parallel_strategy["ddp"] if "ddp" in parallel_strategy else False
-            if self.DDP_enabled: 
+            if self.DDP_enabled:
                 self.communicator = Communicator(gpus_per_node, self.rank)
                 self.world_size = self.communicator.world_size
                 assert  self.world_size > 1, 'More than 1 GPU required for ditributed training'
@@ -112,7 +114,7 @@ class FourierNeuralOperator:
         self.data_config.pop("outType", 'solution')
         self.data_config.pop("outScaling", 1.0)
         self.use_domain_sampling = True if self.data_config['sampling_mode'] is not None else False  # only for 2D
-        self.dataClass = data['dataClass'] 
+        self.dataClass = data['dataClass']
 
         # sample RBC: [batchSize, channel, nX, nY, (nZ)], sample PIC: [batchSize, channel, dim]
         self.trainLoader, self.valLoader, self.dataset = getDataLoaders(**self.data_config, kX=model['kX'], kY=model['kY'], kZ=model['kZ'])
@@ -145,9 +147,9 @@ class FourierNeuralOperator:
             self.losses = {
                 "model": {"valid": -1, "train": -1}
             }
-        
+
         print_rank0("### Model Infos ###")
-        
+
         if checkpoint is not None:
             self.load(checkpoint)
         else:
@@ -155,7 +157,7 @@ class FourierNeuralOperator:
             self.setupOptimizer(optim)
             self.setupLRScheduler(lr_scheduler)
             self.epochs = 0
-            
+
         self.tCompEpoch = 0
         self.gradientNormEpoch = 0.0
         self.writer = SummaryWriter(self.fullPath("tensorboard")) if self.USE_TENSORBOARD else None
@@ -211,7 +213,7 @@ class FourierNeuralOperator:
 
         if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:
             # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, channel, nX, ny]
-            inp_list, out_list = next(data_iter)  
+            inp_list, out_list = next(data_iter)
             nBatches = len(inp_list)
 
         with torch.no_grad():
@@ -288,25 +290,26 @@ class FourierNeuralOperator:
                 loss = self.lossFunction(pred, ref)
                 if self.enable_profile:
                     nvtx.range_pop() # end loss
-            
+
+            total_loss += loss.item()
             optimizer.zero_grad()
             if self.debug:
                 print_rank0(f"[DEBUG] batch loss: {loss.item():.6e}, pred min/max: {pred.min().item():.6e}/{pred.max().item():.6e}, \
                              ref min/max: {ref.min().item():.6e}/{ref.max().item():.6e}")
-            
+
             if self.benchmark and iBatch % 10 == 0:
                 allocated = torch.cuda.memory_allocated() / (1024 ** 2)  # MB
                 reserved = torch.cuda.memory_reserved() / (1024 ** 2)    # MB
                 fwd_peak_mem.append(allocated)
                 fwd_reserv_mem.append(reserved)
 
-            # Backward 
+            # Backward
             if self.enable_profile:
                 nvtx.range_push("backward")
             self.scaler.scale(loss).backward()
             if self.enable_profile:
                 nvtx.range_pop()  # end backward
-            
+
             if self.debug:
                 any_grad_nonzero = False
                 for name, p in self.model.named_parameters():
@@ -365,15 +368,15 @@ class FourierNeuralOperator:
 
             if self.USE_TENSORBOARD:
                 self.writer.add_scalar("Gradients/Norm", grad_norm,iBatch)
-                
-            # print_rank0(f" At [{iBatch*batchSize + len(inp)}/{nSamples:>5d}] loss: {loss.item():>7f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}")
-            total_loss += loss.item()
 
+            # print_rank0(f" At [{iBatch*batchSize + len(inp)}/{nSamples:>5d}] loss: {loss.item():>7f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}")
+            
         if self.USE_TENSORBOARD:
             self.writer.add_scalar("LearningRate", optimizer.param_groups[0]['lr'], self.epochs)
 
         scheduler_step(scheduler)
         avg_loss = total_loss / nBatches
+        #avg_loss = total_loss / len(self.trainLoader.dataset)
 
         if self.DDP_enabled:
             if self.enable_profile:
@@ -389,8 +392,8 @@ class FourierNeuralOperator:
 
         self.losses["model"]["train"] = train_loss
         self.gradientNormEpoch = gradsEpoch / nBatches
-        print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.6f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
-        
+        print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.4e} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
+
         if self.benchmark:
             print_rank0(f"CUDA Memory for Fwd Pass - Allocated: {mean(fwd_peak_mem):.2f} MB")
             print_rank0(f"CUDA Memory for Fwd Pass - Reserved: {mean(fwd_reserv_mem):.2f} MB")
@@ -402,12 +405,15 @@ class FourierNeuralOperator:
             if self.profiler_type == "torch":
                 self.profiler.stop()
             nvtx.range_pop() # end epoch
-          
+
     def valid(self):
         model = self.model.eval()
         nBatches = len(self.valLoader)
         # batchSize = self.valLoader.batch_size
         total_loss = 0.0
+        relative_error = 0.0
+        #median_error = torch.zeros(len(self.valLoader.dataset))
+        local_errors = torch.zeros(nBatches)
         data_iter = iter(self.valLoader)
 
         if self.dataClass == 'rbc':
@@ -417,13 +423,13 @@ class FourierNeuralOperator:
 
         if self.use_domain_sampling and not self.data_config['pad_to_fullGrid']:  # only for RBC2D
             # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, channel, nX, ny]
-            inp_list, out_list = next(data_iter) 
+            inp_list, out_list = next(data_iter)
             nBatches = len(inp_list)
             # batchSize = len(inp_list[0])
 
         with torch.no_grad():
             for iBatch in range(nBatches):
-                # Batch 
+                # Batch
                 # if self.enable_profile:
                 #     nvtx.range_push(f"ValEpoch_{self.epochs}_Batch_{iBatch}")
                 if self.enable_profile:
@@ -438,11 +444,14 @@ class FourierNeuralOperator:
                 ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
 
                 pred = model(inp)
-                
+
                 # if self.enable_profile:
                 #     nvtx.range_push("valLoss")
                 loss = self.lossFunction(pred,ref)
+                error = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))/torch.mean(torch.abs(ref.flatten(start_dim=1))) * 100
                 total_loss += loss.item()
+                relative_error += error.item()
+                local_errors[iBatch] = error.item()
                 # if self.enable_profile:
                 #     nvtx.range_pop() # end loss
                 #     nvtx.range_pop() # end batch
@@ -450,20 +459,34 @@ class FourierNeuralOperator:
                     nvtx.range_pop() # end forward
 
         avg_loss = total_loss / nBatches
+        relative_error = relative_error / nBatches
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
             ddp_loss = torch.Tensor([avg_loss]).to(self.device).clone()
+            ddp_rel_error = torch.Tensor([relative_error]).to(self.device).clone()
             self.communicator.allreduce(ddp_loss,op=dist.ReduceOp.AVG)
+            self.communicator.allreduce(ddp_rel_error,op=dist.ReduceOp.AVG)
             val_loss = ddp_loss.item()
+            val_error = ddp_rel_error.item()
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            local_errors = local_errors.to(self.device)
+            out = torch.empty(world_size * local_errors.numel(),
+                                       device=self.device,
+                                       dtype=local_errors.dtype)
+            self.communicator.allgather(out,local_errors)
+            median_error = out.median().item()
             if self.enable_profile:
                 nvtx.range_pop() # end ddploss
         else:
             val_loss = avg_loss
+            val_error = relative_error
+            median_error = local_errors.median().item()
 
         self.losses["model"]["valid"] = val_loss
-        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.6f} (id: {idLoss:>7f})\n")
+        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.4e} Test Error={val_error:.2f}% Median Test Error={median_error:.4f}% (id: {idLoss:>7f})\n")
 
     def learn(self, nEpoch, save_interval=100):
         self.epochs += 1
@@ -540,17 +563,17 @@ class FourierNeuralOperator:
                 monitor_time.append(t_monit)
 
             self.epochs += 1
-        
+
         print_rank0("Done Training!")
         if self.enable_profile and self.profiler_type == "nsys":
             torch.cuda.cudart().cudaProfilerStop()
-        
+
         if self.benchmark and len(epoch_time) > 0:
             num_epochs = len(epoch_time)
-            total_epoch_time = sum(epoch_time) 
+            total_epoch_time = sum(epoch_time)
             total_train_time = sum(train_time)
             total_compute_time = sum(compute_time)
-            total_monitor_time = sum(monitor_time) 
+            total_monitor_time = sum(monitor_time)
             total_checkpoint_time = sum(checkpoint_time)
             total_samples = num_epochs * (len(self.trainLoader.dataset) + len(self.valLoader.dataset))
             total_train_samples = num_epochs * len(self.trainLoader.dataset)
@@ -563,7 +586,7 @@ class FourierNeuralOperator:
                             "TotalMonitorTime (s)", "TotalCheckpointTime (s)",
                             "TotalComputeTime (s)","TotalTrainTime (s)",
                             "MeanCompileTime (s)", "TotalTrainTimesteps",
-                            "TotalTimesteps", "TrainTimesteps/s", 
+                            "TotalTimesteps", "TrainTimesteps/s",
                             "Timesteps/s"],
                 "Value": [  round(num_epochs,0),
                             round(total_epoch_time, 3),
@@ -582,7 +605,7 @@ class FourierNeuralOperator:
             for metric, value in zip(data["Metric"], data["Value"]):
                 print_rank0(f"{metric}: {value}")
             print_rank0("==========================\n")
-      
+
     def monitor(self):
         if self.USE_TENSORBOARD and self.rank == 0:
             self.writer.add_scalars("Losses", {
@@ -609,14 +632,19 @@ class FourierNeuralOperator:
                 }
 
                 if self.dataClass == "rbc":
+                    if self.epochs == 1:
+                        f.write("Epochs\t\tTrainLoss\t\tValidLoss\t\tTrainIdLoss\t\tValidIdLoss\t\tGradNorm\t\tComputeTime\n")
                     line = "{epochs}\t{train:1.18f}\t{valid:1.18f}\t{train_id:1.18f}\t{valid_id:1.18f}\t{gradNorm:1.18f}\t{tComp}\n"
                     format_dict.update({
                         "train_id": self.losses["id"]["train"],
                         "valid_id": self.losses["id"]["valid"]
                     })
+                else:
+                    if self.epochs == 1:
+                        f.write("Epochs\t\tTrainLoss\t\tValidLoss\t\tGradNorm\t\tComputeTime\n")
 
                 f.write(line.format(**format_dict))
-           
+
     def save(self, filename):
         path = self.fullPath(filename)
         checkpoint = {
@@ -631,7 +659,7 @@ class FourierNeuralOperator:
             "lr_scheduler": self.scheduler_name,
             "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
             }
-        
+
         if self.debug:
             #  verify optimizer state saved
             print_rank0(f"[DEBUG][save] Saving optimizer with {len(self.optimizer.state_dict()['state'])} entries")
@@ -652,11 +680,11 @@ class FourierNeuralOperator:
                     checkpoint['model'][key] = value
             print_rank0("WARNING : different model settings in config file,"
                     " overwriting with config from checkpoint ...")
-            
+
         print_rank0(f"Model: {checkpoint['model']}")
         state_dict = checkpoint['model_state_dict']
 
-        # creating new OrderedDict for model trained without DDP but used now with DDP 
+        # creating new OrderedDict for model trained without DDP but used now with DDP
         # or model trained using DPP but used now without DDP
         new_state_dict = OrderedDict()
         for k, v in state_dict.items():
@@ -683,7 +711,7 @@ class FourierNeuralOperator:
         if not modelOnly:
             self.setupOptimizer({"name": checkpoint['optim']})
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-            
+
             # Move optimizer state tensors to correct device
             for state in self.optimizer.state.values():
                 for k, v in state.items():
@@ -701,7 +729,7 @@ class FourierNeuralOperator:
                     for name, t in v.items():
                         if isinstance(t, torch.Tensor):
                             print_rank0(f"[DEBUG][load] Param {k} - {name}: device={t.device}, mean={t.float().mean().item():.6e}")
-                
+
 
         # waiting for all ranks to load checkpoint
         if self.DDP_enabled:
@@ -722,23 +750,15 @@ class FourierNeuralOperator:
         enable_tf32_only_on_a100()
         model = self.model.eval()
         inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
-    
+
         with torch.no_grad():
             for _ in range(nEval):
                 outp = model(inpt)
                 if self.outType == "update":
                     outp /= self.outScaling
-
-                    # Mapping output to input shape to perform addition
-                    if outp.shape == inpt.shape:
-                        outp += inpt
-                    else:
-                        sliced_inpt = inpt[:,:,
-                                      self.modelConfig['iXBeg']: self.modelConfig['iXEnd'],
-                                      self.modelConfig['iYBeg']: self.modelConfig['iYEnd']]
-                        # print_rank0(f'Sliced Input: {sliced_inpt.shape}')
-                        outp += sliced_inpt
+                    outp += inpt
                 inpt = outp
 
-        u1 = outp.cpu().detach().numpy()
+        # u1 = outp.cpu().detach().numpy()
+        u1 = cp.from_dlpack(outp.detach())
         return u1

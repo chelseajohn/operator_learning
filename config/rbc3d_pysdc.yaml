@@ -51,14 +51,10 @@ model:
   channel_mlp_expansion: 4
   use_skip_connection: false
   skip_type: soft-gating
-  use_dse: false
-  get_subdomain_output: false             # set to true only for inference
-  iXBeg: 0
-  iYBeg: 0
-  iZBeg: 0
-  iXEnd: 64
-  iYEnd: 64
-  iZEnd: 32
+  use_dse: false                        # Direct Spectral Evaluation
+  use_kb: false                         # Kaiser-Bessel NUFFT
+  use_toeplitz: false                   # Toeplitz NUFFT
+
 
 optim:
   name: adam

@@ -3,7 +3,7 @@ simu:
   nDim: 1
 
 sample:
-  iEnd: 200
+  iEnd: 600
   step: 1
 
 data:
@@ -15,13 +15,13 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: /p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/PIC1D_electrostatic_22_01_26.h5
+  dataFile: /p/project1/hai_1073/muralikrishnan1/Datasets_1D_electrostatic_plasma/original_datasets/PIF1D_4_miniapps_QL_normalize.h5
   trainRatio: 0.8
   batchSize: 20        # Global Batch size
   sampling_mode: None  # [fixed, ordered, random]
  
 model:
-  da: 2
+  da: 1
   du: 1
   dv: 32
   kX: 16
@@ -62,8 +62,8 @@ parallel_strategy:
   gpus_per_node: 4
 
 train:
-  trainDir: PIC1D
-  epochs: 100                    # nEpochs
+  trainDir: PIF1D_4_miniapps_QL_normalize
+  epochs: 250                    # nEpochs
   checkpoint: None
   saveInterval: 50
   disableTensorboard: true
