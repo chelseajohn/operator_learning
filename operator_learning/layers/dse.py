@@ -22,8 +22,10 @@ class SpectralConv_dse(nn.Module):
         self.device_mesh = device_mesh
         if device_mesh is not None and "tp" in device_mesh.mesh_dim_names:
             self.TP_enabled = True
+            self.tp_size = device_mesh["tp"].size()
         else:
             self.TP_enabled = False
+            self.tp_size = 1
       
 
         if dim == 1:
@@ -79,7 +81,6 @@ class SpectralConv_dse(nn.Module):
         # Transform to fourier space
         # Fourier coeffs (complex)
         x_ft = transform.forward(x.to(dtype))  # [batchsize, dv, modes]
-
 
         if self.TP_enabled:
             torch.distributed.all_reduce(x_ft, group=self.device_mesh.get_group())

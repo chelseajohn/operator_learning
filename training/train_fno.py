@@ -83,10 +83,15 @@ class FourierNeuralOperator:
             self.profiler = None
 
         if parallel_strategy is not None:
-            gpus_per_node = parallel_strategy["gpus_per_node"] if "gpus_per_node" in parallel_strategy else 4
-            self.DDP_enabled = parallel_strategy["ddp"] if "ddp" in parallel_strategy else False
+            gpus_per_node = parallel_strategy.get("gpus_per_node", 4)
+            self.DDP_enabled = parallel_strategy.get("ddp", False)
             # Tensor Parallel implemented only for PIC problem with DSE transform
-            self.TP_enabled = parallel_strategy["tp"] if "tp" in parallel_strategy else False
+            self.TP_enabled = parallel_strategy.get("tp", False)
+            self.tp_size = parallel_strategy.get("tp_size", 2) if self.TP_enabled else 1
+            self.device_mesh = None
+            self.tp_mesh = None
+            self.dp_mesh = None
+            self.dp_size = 1
            
             if self.DDP_enabled or self.TP_enabled:
                 self.communicator = Communicator(gpus_per_node, self.rank)
@@ -95,42 +100,42 @@ class FourierNeuralOperator:
                 self.device = self.communicator.device
                 self.rank = self.communicator.rank
                 self.local_rank = self.communicator.local_rank
+
+            if self.DDP_enabled and self.TP_enabled:
+                self.dp_size = self.world_size // self.tp_size
+            elif self.DDP_enabled:
                 self.dp_size = self.world_size
                 
             if self.TP_enabled:
-                self.tp_size = parallel_strategy["tp_size"] if "tp_size" in parallel_strategy else 2
                 assert (
                         self.world_size % self.tp_size == 0
                     ), f"World size {self.world_size} needs to be divisible by TP size {self.tp_size}"
-            else:
-                self.tp_size = 1
-                self.tp_mesh = None
+                if self.DDP_enabled:
+                    mesh_shape = (self.dp_size, self.tp_size)
+                    mesh_name = ("dp", "tp")
+                else:
+                    mesh_shape = (self.world_size,)
+                    mesh_name = ("tp",)
             
-            if self.DDP_enabled and self.TP_enabled:
-                self.dp_size = self.world_size // self.tp_size
                 self.device_mesh = init_device_mesh(device_type=self.autocast_device_type,
-                                                mesh_shape=(self.dp_size, self.tp_size),
-                                                mesh_dim_names=("dp", "tp")
+                                                mesh_shape=mesh_shape,
+                                                mesh_dim_names=mesh_name
                                                 )
                 self.tp_mesh = self.device_mesh["tp"]
-                self.dp_mesh = self.device_mesh["dp"]
-                self.tp_rank = self.tp_mesh.get_local_rank()
-                self.dp_rank = self.dp_mesh.get_local_rank()
+                self.dp_mesh = self.device_mesh["dp"] if self.DDP_enabled else None
+                self.tp_rank = (
+                        self.tp_mesh.get_local_rank()
+                        if self.DDP_enabled
+                        else self.tp_mesh.get_rank()
+                    )
+                self.dp_rank = self.dp_mesh.get_local_rank() if self.DDP_enabled else None
                 
-            elif self.TP_enabled:
-                self.device_mesh =  init_device_mesh(device_type=self.autocast_device_type,
-                                                    mesh_shape=(self.world_size,),
-                                                    mesh_dim_names=("tp",)
-                                                )
-                self.tp_mesh = self.device_mesh["tp"]
-                self.tp_rank = self.tp_mesh.get_rank()
-                self.dp_size = 1
-            
             print_rank0(f'Using DDP with {self.dp_size} GPUs and Tensor Parallel with {self.tp_size} GPUs.')
         else:
             self.DDP_enabled = False
             self.TP_enabled = False
             self.device_mesh = None
+            self.dp_mesh = None
 
 
         # Evaluation-only mode
@@ -155,7 +160,11 @@ class FourierNeuralOperator:
         self.dataClass = data['dataClass']
 
         # sample RBC: [batchSize, channel, nX, nY, (nZ)], sample PIC: [batchSize, channel, dim]
-        self.trainLoader, self.valLoader, self.dataset = getDataLoaders(**self.data_config, kX=model['kX'], kY=model['kY'], kZ=model['kZ'])
+        self.trainLoader, self.valLoader, self.dataset, self.train_sampler, self.val_sampler = getDataLoaders(
+                                                                        **self.data_config,
+                                                                         kX=model['kX'], kY=model['kY'], 
+                                                                         kZ=model['kZ'], dp_mesh=self.dp_mesh,
+                                                                        )
         self.outType = self.dataset.outType
         self.outScaling = self.dataset.outScaling
 
@@ -533,24 +542,26 @@ class FourierNeuralOperator:
                 # if self.enable_profile:
                 #     nvtx.range_push("valLoss")
                 local_loss = self.lossFunction(pred,ref)
-                local_error = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))/torch.mean(torch.abs(ref.flatten(start_dim=1))) * 100
-                if self.TP_enabled:
-                    loss_tensor = local_loss.detach().clone()
-                    dist.all_reduce(loss_tensor, 
-                                    op=dist.ReduceOp.AVG,
-                                    group=self.tp_mesh.get_group())
-                    total_loss += loss_tensor
+                error = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))/torch.mean(torch.abs(ref.flatten(start_dim=1))) * 100
+                local_errors[iBatch] = error.detach()
+                # if self.TP_enabled:
+                #     # only for logging 
+                #     loss_tensor = local_loss.detach().clone()
+                #     dist.all_reduce(loss_tensor, 
+                #                     op=dist.ReduceOp.AVG,
+                #                     group=self.tp_mesh.get_group())
+                #     total_loss += loss_tensor
 
-                    error_tensor = local_error.detach().clone()
-                    dist.all_reduce(error_tensor,
-                                    op=dist.ReduceOp.AVG,
-                                    group=self.tp_mesh.get_group())
-                    relative_error += error_tensor
-                    # if iBatch % 10 == 0:
-                    #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {loss_tensor} tp_error: {error_tensor}\n")
-                else:
-                    total_loss += local_loss.detach()
-                    relative_error += local_error.detach()
+                #     error_tensor = error.detach().clone()
+                #     dist.all_reduce(error_tensor,
+                #                     op=dist.ReduceOp.AVG,
+                #                     group=self.tp_mesh.get_group())
+                #     relative_error += error_tensor
+                #     # if iBatch % 10 == 0:
+                #     #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {loss_tensor} tp_error: {error_tensor}\n")
+                # else:
+                total_loss += local_loss.detach()
+                relative_error += error.detach()
                 # if self.enable_profile:
                 #     nvtx.range_pop() # end loss
                 #     nvtx.range_pop() # end batch
@@ -558,43 +569,31 @@ class FourierNeuralOperator:
                     nvtx.range_pop() # end forward
 
         avg_loss = total_loss/nBatches
-        relative_error = relative_error / len(self.valLoader.dataset)
+        relative_error = relative_error / nBatches
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
-<<<<<<< HEAD
             dist.all_reduce(avg_loss, 
                             op=dist.ReduceOp.AVG, 
                             group=self.dp_group)
-  
-            if self.enable_profile:
-                nvtx.range_pop() # end ddploss
-      
-        val_loss = avg_loss.item() # loss per gpu
-=======
-            ddp_loss = torch.Tensor([avg_loss]).to(self.device).clone()
-            ddp_rel_error = torch.Tensor([relative_error]).to(self.device).clone()
-            self.communicator.allreduce(ddp_loss,op=dist.ReduceOp.AVG)
-            self.communicator.allreduce(ddp_rel_error,op=dist.ReduceOp.AVG)
-            val_loss = ddp_loss.item()
-            val_error = ddp_rel_error.item()
-            world_size = dist.get_world_size()
-            rank = dist.get_rank()
-            local_errors = local_errors.to(self.device)
-            out = torch.empty(world_size * local_errors.numel(),
-                                       device=self.device,
-                                       dtype=local_errors.dtype)
-            self.communicator.allgather(out,local_errors)
-            median_error = out.median().item()
+            dist.all_reduce(relative_error,
+                            op=dist.ReduceOp.AVG, 
+                            group=self.dp_group)
+            # local_errors = local_errors.to(self.device)
+            # out = torch.zeros(self.world_size * local_errors.numel(),
+            #                   device=local_errors.device,
+            #                   dtype=local_errors.dtype)
+            # dist.all_gather_into_tensor(out, local_errors)
+            # median_error = out.median().item()
+            median_error = 0.0
             if self.enable_profile:
                 nvtx.range_pop() # end ddploss
         else:
-            val_loss = avg_loss
-            val_error = relative_error
             median_error = local_errors.median().item()
-
->>>>>>> 734f1e4b86b4b7d3cc1ffd63d89eb6707c2f7556
+      
+        val_loss = avg_loss.item() # loss per gpu
+        val_error = relative_error.item()
         self.losses["model"]["valid"] = val_loss
         print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.4e} Test Error={val_error:.2f}% Median Test Error={median_error:.4f}% (id: {idLoss:>7f})\n")
 
@@ -626,6 +625,11 @@ class FourierNeuralOperator:
 
         for i in range(start_epoch, end_epoch):
             print_rank0(f"\nEpoch {i}")
+
+            if self.train_sampler is not None: 
+                self.train_sampler.set_epoch(i)
+            if self.val_sampler is not None:
+                self.val_sampler.set_epoch(i)
 
             t0_epoch = time.perf_counter()
             # start profiling only from 3 iteration

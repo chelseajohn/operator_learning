@@ -29,9 +29,9 @@ class VandermondeTransform:
             self.X_ = torch.cat((torch.arange(kX, dtype=dtype, device=device), \
                                  torch.arange(start=-(kX), end=0, dtype=dtype, device=device)), 
                                  0)[None,:,None]   # [1, 2*kX, 1]
-            self.Y_ = torch.cat((torch.arange(kY,dtype=dtype, device=device), \
-                                 torch.arange(start=-(kY-1), end=0, dtype=dtype, device=device)),
-                                 0)[None,:,None]   # [1, 2*kY-1, 1]
+            self.Y_ = torch.cat((torch.arange(kY, dtype=dtype, device=device), \
+                                 torch.arange(start=-(kY), end=0, dtype=dtype, device=device)),
+                                 0)[None,:,None]   # [1, 2*kY, 1]
             
     def make_1Dmatrix(self):
   
@@ -46,8 +46,8 @@ class VandermondeTransform:
     def make_2Dmatrix(self):
         
         with torch.no_grad():
-            # m = (self.kX*2)*(self.kY*2-1)
-            X_mat = torch.matmul(self.X_, self.x_positions[:,None,:]).repeat(1, (2*self.kY-1), 1).to(self.device)
+            # m = (self.kX*2)*(self.kY*2)
+            X_mat = torch.matmul(self.X_, self.x_positions[:,None,:]).repeat(1, 2*self.kY, 1).to(self.device)
             Y_mat = torch.matmul(self.Y_, self.y_positions[:,None,:]).repeat(1, 2*self.kX, 1).to(self.device)
             
             forward_mat = torch.exp(-1j* (X_mat+Y_mat))/self.number_points

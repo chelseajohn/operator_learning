@@ -9,7 +9,8 @@ from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer, NUFFTLayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
-#from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
+from operator_learning.data.transforms.vandermonde_matrix_free import VandermondeTransformMatrixFree
+from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
 
 class FNOLayer(nn.Module):
 
@@ -134,6 +135,7 @@ class FNO(nn.Module):
         self.dataset = dataset if dataClass == 'rbc' else None
         self.data_type = torch.float16 if use_complex_amp and self.training else torch.float32
         self.device_mesh = kwargs.get("device_mesh", None)
+        self.matrix_free = matrix_free
 
         if use_dse:
             self.layers = nn.ModuleList(
@@ -204,19 +206,36 @@ class FNO(nn.Module):
 
         if self.use_dse:
             if self.n_dims == 1:
-                transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                if self.matrix_free:
+                    transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
+                                                       kX=self.kX, 
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.data_type
+                                                        )
+                else:
+                    transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                        kX=self.kX, 
                                                        dim=self.n_dims,
                                                        device=self.device,
                                                        dtype=self.data_type)
             elif self.n_dims == 2:
-                transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                if self.matrix_free:
+                    transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
                                                        y_positions=x[:,1,:],
                                                        kX=self.kX, 
                                                        kY=self.kY,
                                                        dim=self.n_dims,
                                                        device=self.device,
                                                        dtype=self.data_type)
+                else:
+                    transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                                                        y_positions=x[:,1,:],
+                                                        kX=self.kX, 
+                                                        kY=self.kY,
+                                                        dim=self.n_dims,
+                                                        device=self.device,
+                                                        dtype=self.data_type)
             else:
                 raise ValueError("Vandermonde Transform not implemented for 3D")
 

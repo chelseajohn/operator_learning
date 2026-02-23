@@ -55,6 +55,7 @@ def getDataLoaders(dataFile,
                    use_minLimit=False,
                    padding=[0,0,0,0], 
                    add_fullGrid=False, # to include full grid with domain grids
+                   dp_mesh=None,
                    **kwargs):
 
     if sampling_mode is not None:
@@ -107,9 +108,15 @@ def getDataLoaders(dataFile,
             dataset, [trainSize, valSize], generator=generator)
 
     if torch.distributed.is_initialized():
-        local_batchSize = int(batchSize / torch.distributed.get_world_size())
-        train_sampler = DistributedSampler(trainSet, num_replicas=get_world_size(), rank=get_rank(), shuffle=True)
-        val_sampler = DistributedSampler(valSet, num_replicas=get_world_size(), rank=get_rank(), shuffle=False)
+        if dp_mesh is not None:
+            dp_size = dp_mesh.size()
+            dp_rank = dp_mesh.get_local_rank()
+        else:
+            dp_size = get_world_size()
+            dp_rank = get_rank()
+        local_batchSize = batchSize // dp_size
+        train_sampler = DistributedSampler(trainSet, num_replicas=dp_size, rank=dp_rank, shuffle=True)
+        val_sampler = DistributedSampler(valSet, num_replicas=dp_size, rank=dp_rank, shuffle=False)
     else:
         local_batchSize = batchSize
         train_sampler = None
@@ -127,4 +134,4 @@ def getDataLoaders(dataFile,
     trainLoader = DataLoader(trainSet, batch_size=train_batchSize, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
     valLoader = DataLoader(valSet, batch_size=valid_batchSize, sampler=val_sampler, shuffle=False, num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
 
-    return trainLoader, valLoader, dataset
+    return trainLoader, valLoader, dataset, train_sampler, val_sampler
