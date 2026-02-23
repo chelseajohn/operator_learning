@@ -437,10 +437,10 @@ class PICVisualizer:
             gamma = 0.356
         ind = np.argmin(np.abs(a - 8.0))
         theo_ref = np.exp(gamma * a)
-        if Ex is not None:
-            theo_ref = (Ex[ind]/theo_ref[ind])*theo_ref
+        if Ey is not None:
+            theo_ref = (Ey[ind]/theo_ref[ind])*theo_ref
         else:
-            theo_ref = (ExPred[ind]/theo_ref[ind])*theo_ref
+            theo_ref = (EyPred[ind]/theo_ref[ind])*theo_ref
         plt.plot(a, theo_ref, label='predicted growth rate', color='seagreen')
         if ExPred is not None:
             plt.plot(a, ExPred, label=r'$\int EPred_x^2 dV$', color='blue', linestyle="--")
