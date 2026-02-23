@@ -12,16 +12,19 @@ class VandermondeTransform:
         assert dim in (1, 2), "dim must be 1 or 2"
         self.dim = dim
         self.kX = kX
-        x_positions -= torch.min(x_positions)
+        x_positions = x_positions - torch.min(x_positions)
         self.x_positions = x_positions * 6.28 / torch.max(x_positions)
         self.batch_size = x_positions.shape[0]
         self.number_points = x_positions.shape[1]
+        self.X_ = torch.cat((torch.arange(self.kX, dtype=dtype, device=device), 
+                             torch.arange(start=-(self.kX), end=0, dtype=dtype, device=device)), 
+                             0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kX, 1]
 
         if dim == 1:
             self.X_ = torch.arange(kX, dtype=dtype, device=device)[None, :, None] # [1, kX, 1]
         else:
             self.kY = kY if kY is not None else kX
-            y_positions -= torch.min(y_positions)
+            y_positions = y_positions - torch.min(y_positions)
             self.y_positions = y_positions * 6.28 / torch.max(y_positions)
             self.X_ = torch.cat((torch.arange(kX, dtype=dtype, device=device), \
                                  torch.arange(start=-(kX), end=0, dtype=dtype, device=device)), 

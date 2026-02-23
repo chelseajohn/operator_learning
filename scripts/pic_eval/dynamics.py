@@ -12,7 +12,6 @@ from initial_conditions import findsource
 
 def accelerate(M: cp.ndarray, 
                E: cp.ndarray,
-               Eout: cp.ndarray, 
                wp: float, 
                QM: float,
                it: int,
@@ -36,15 +35,18 @@ def accelerate(M: cp.ndarray,
     if dim == 1:
         Etemp = M * E
         a = cp.transpose(Etemp) * QM / wp
-        Eout[it, :] = Etemp.astype(cp.float32)
+        Eout = Etemp.astype(cp.float32)
     else:
         Extemp = M * E[0].flatten()
         Eytemp = M * E[1].flatten()
         a1 = cp.transpose(Extemp) * QM / wp
         a2 = cp.transpose(Eytemp) * QM / wp
-        Eout[it,:,0] = Extemp.astype(cp.float32)
-        Eout[it,:,1] = Eytemp.astype(cp.float32)
+        #Eout[it,:,0] = Extemp.astype(cp.float32)
+        #Eout[it,:,1] = Eytemp.astype(cp.float32)
         a = cp.array([a1, a2])
+        Eout = cp.zeros([2, a.shape[1]])
+        Eout[0,:] = Extemp.astype(cp.float32) 
+        Eout[1,:] = Eytemp.astype(cp.float32)
     
     return a, Eout
 
@@ -61,7 +63,9 @@ def accelerateML(E: cp.ndarray, wp: float, QM: float):
     Returns:
         cp.ndarray: Particle accelerations.
     """
-    return E * QM / wp
+    a = E * QM / wp
+    
+    return a 
 
 
 def push(vp: cp.ndarray, a: cp.ndarray, 
@@ -135,12 +139,11 @@ def toPeriodic(x: cp.ndarray, L: float, discrete: bool=False):
     x[out] = x[out] - L
     return x
 
-def toPeriodicND(x: cp.ndarray, L: float, dim :int=2, discrete: bool=False):
+def toPeriodicNDOld(x: cp.ndarray, L: float, dim :int=2):
     for i in range(dim):
-        x[:,i] = toPeriodic(x[:,i], L[i], discrete)
+        x[i] = toPeriodic(x[i], L[i])
     return x
 
-def toPeriodicNDTranspose(x: cp.ndarray, L: float, dim :int=2, discrete: bool=False):
-    for i in range(dim):
-        x[i] = toPeriodic(x[i], L[i], discrete)
+def toPeriodicND(x: cp.ndarray, L: float, dim :int=2):
+    x = cp.mod(x, cp.asarray(L)[:, None])
     return x

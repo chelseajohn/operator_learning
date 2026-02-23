@@ -8,6 +8,8 @@ sys.path.append(str(base_path))
 
 import argparse
 import torch
+import numpy as np
+import cupy as cp
 
 from operator_learning.utils.misc import readConfig
 from training.train_fno import FourierNeuralOperator
@@ -46,6 +48,12 @@ parser.add_argument(
 parser.add_argument(
     "--dim", default="1", type=int, help="dimension")
 parser.add_argument(
+    "--predOnly", action="store_true", help="Perform only ML predictions without reference results")
+parser.add_argument(
+    "--testCase", default="strongLandau", help="Choose the test case among weakLandau, strongLandau, tsi or bti")
+parser.add_argument(
+    "--ref", default="pic", help="Choose the reference numerical scheme pic or pif")
+parser.add_argument(
     "--config", default=None, help="configuration file")
 args = parser.parse_args()
 
@@ -63,19 +71,20 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device_name = torch.cuda.get_device_name(0) if device == 'cuda' else 'CPU'
 checkpoint = args.checkpoint
 dim = args.dim
+predOnly = args.predOnly
+testCase = args.testCase
+
+seed = 152
+torch.manual_seed(seed)
+np.random.seed(seed)
+cp.random.seed(seed)
+torch.cuda.manual_seed_all(seed)
 vis = PICVisualizer(args)
-#breakpoint()
 
 if checkpoint is not None:
     fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
-    if dim == 1:
-        #posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic1D(ml_acc=True, model=fno_model, data_file='/p/project1/pepcexa/muralikrishnan1/operator_learning/PIC1D_electrostatic.h5')
-        #phase_spacePred = vis.phase_space(xp=posPred, vp=velPred, wp=wPred, ml_acc=True)
-        phase_spacePred = None
-    else:
-        posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, EPred, timePred = vis.pic2D(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
-        phase_spacePred = None
+    posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, timePred = vis.picND(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
+    phase_spacePred = None
 
 else:
     EnergyPred = None
@@ -83,23 +92,35 @@ else:
     EpPred = None
     EPred = None
     pPred = None
+    ExpPred = None
+    EypPred = None
     timePred = None
     phase_spacePred = None
     growth_ratePred = None
     speedup = 1
 
-if dim == 1:
-    posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic1D(ml_acc=False)
-    #phase_spaceRef = vis.phase_space(xp=posRef, vp=velRef, wp=wRef, ml_acc=False)
+if predOnly is False:
+    posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, EypRef, timeRef = vis.picND(ml_acc=False)
     phase_spaceRef = None
 else:
-    posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ERef, timeRef = vis.pic2D(ml_acc=False)
+    EnergyRef = None
+    EkRef = None
+    EpRef = None
+    ERef = None
+    pRef = None
+    ExpRef = None
+    EypRef = None
+    timeRef = None
     phase_spaceRef = None
+    growth_rateRef = None
+    speedup = 1
 
-#growth_rate = vis.twoStreamIppl(ExRef=ERef, ExPred=EPred)  
-energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EkPred=EkPred, EpRef=EpRef, EpPred=EpPred)
+energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EpRef=EpRef, EkPred=EkPred, EpPred=EpPred)
 conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
-landau_decay = vis.landau_decay(Ex=ERef, ExPred=EPred)
+if ((testCase == "weakLandau") or (testCase == "strongLandau")):
+    landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
+elif ((testCase == "tsi") or (testCase == "bti")):
+    growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
 
 HEADER = """
 # FNO evaluation for PIC in {dim}D on {device}
@@ -126,19 +147,19 @@ if phase_spaceRef is not None:
 if phase_spacePred is not None:
     TEMPLATE += f"- [Phase space Pred]({phase_spacePred})\n"
 
-TEMPLATE  += f"\nAverage time for Accleration per timestep in PIC (microsec): {timeRef}\n"
+TEMPLATE  += f"\nAverage time for Accleration per timestep in PIC (millisec): {timeRef}\n"
 
-if timePred is not None:
-    speedup = round(timePred/timeRef,3)
-    TEMPLATE += f"Average Inference time for Accleration using FNO (microsec): {timePred}\n"
-    TEMPLATE += f"Speed up FNO/PIC: {speedup}\n"
+if timePred is not None and timeRef is not None:
+    speedup = round(timeRef/timePred,3)
+    TEMPLATE += f"Average Inference time for Accleration using FNO (millisec): {timePred}\n"
+    TEMPLATE += f"Speed up PIC/FNO: {speedup}\n"
                 
 summary.write(TEMPLATE.format(
         dim=dim,
         device=device,
         energy=energy,
         conserv_errors=conserv_error,
-        landau_decay=landau_decay,
+        landau_decay=None,
         phase_spaceRef=phase_spaceRef,
         phase_spacePred=phase_spacePred,
         growth_rate=None,

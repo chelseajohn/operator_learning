@@ -449,6 +449,7 @@ class FourierNeuralOperator:
 
         scheduler_step(scheduler)
         avg_loss = total_loss / nBatches
+        #avg_loss = total_loss / len(self.trainLoader.dataset)
 
         if self.DDP_enabled:
             if self.enable_profile:
@@ -463,7 +464,7 @@ class FourierNeuralOperator:
         train_loss = avg_loss.item()  # loss per gpu
         self.losses["model"]["train"] = train_loss
         self.gradientNormEpoch = gradsEpoch / nBatches
-        print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.6f} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
+        print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.4e} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
 
         if self.benchmark:
             print_rank0(f"CUDA Memory for Fwd Pass - Allocated: {mean(fwd_peak_mem):.2f} MB")
@@ -483,6 +484,8 @@ class FourierNeuralOperator:
         # batchSize = self.valLoader.batch_size
         total_loss = 0.0
         relative_error = 0.0
+        #median_error = torch.zeros(len(self.valLoader.dataset))
+        local_errors = torch.zeros(nBatches)
         data_iter = iter(self.valLoader)
 
         if self.dataClass == 'rbc':
@@ -560,6 +563,7 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
+<<<<<<< HEAD
             dist.all_reduce(avg_loss, 
                             op=dist.ReduceOp.AVG, 
                             group=self.dp_group)
@@ -568,8 +572,31 @@ class FourierNeuralOperator:
                 nvtx.range_pop() # end ddploss
       
         val_loss = avg_loss.item() # loss per gpu
+=======
+            ddp_loss = torch.Tensor([avg_loss]).to(self.device).clone()
+            ddp_rel_error = torch.Tensor([relative_error]).to(self.device).clone()
+            self.communicator.allreduce(ddp_loss,op=dist.ReduceOp.AVG)
+            self.communicator.allreduce(ddp_rel_error,op=dist.ReduceOp.AVG)
+            val_loss = ddp_loss.item()
+            val_error = ddp_rel_error.item()
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            local_errors = local_errors.to(self.device)
+            out = torch.empty(world_size * local_errors.numel(),
+                                       device=self.device,
+                                       dtype=local_errors.dtype)
+            self.communicator.allgather(out,local_errors)
+            median_error = out.median().item()
+            if self.enable_profile:
+                nvtx.range_pop() # end ddploss
+        else:
+            val_loss = avg_loss
+            val_error = relative_error
+            median_error = local_errors.median().item()
+
+>>>>>>> 734f1e4b86b4b7d3cc1ffd63d89eb6707c2f7556
         self.losses["model"]["valid"] = val_loss
-        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.6f} Test Error={relative_error:.2f} (id: {idLoss:>7f})\n")
+        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.4e} Test Error={val_error:.2f}% Median Test Error={median_error:.4f}% (id: {idLoss:>7f})\n")
 
     def learn(self, nEpoch, save_interval=100):
         self.epochs += 1

@@ -9,7 +9,8 @@ import numpy as np
 import cupy as cp
 from scipy import sparse
 from cupyx.scipy import sparse as sparsecp
-#import finufft
+from cupyx import scatter_add
+import cufinufft
 from dynamics import toPeriodic
 
 def interpMatrix(XP: cp.ndarray, wp: float, DX: cp.ndarray, N: int, NG: int, p: cp.ndarray,L: cp.ndarray, dim:int) -> sparsecp.csr_matrix:
@@ -102,17 +103,17 @@ def interpolate(M: sparsecp.csr_matrix, DX: cp.ndarray, L: cp.ndarray, NG: int, 
     else:
         return (Q / (DX[0]*DX[1])) * M.sum(0).reshape([int(L[0]/DX[0]), int(L[1]/DX[1])])
 
-def specInterpolate(XP: cp.ndarray, Shat: cp.ndarray, NG: tuple[int, int], N: int, Q: float, L: tuple[float, float], wp: float = 1) -> cp.ndarray:
+def scatterFourier(XP, SHat, NG, N, Q, L, dim, wp=1):
     """
     Spectrally interpolate particle charges to Fourier-space grid using NUFFT.
 
     Args:
-        XP (cp.ndarray): Particle positions (2D array, shape [2, N]).
+        XP (cp.ndarray): Particle positions (ND array, shape [dim, N]).
         Shat (cp.ndarray): Shape factors in Fourier space.
-        NG (tuple[int, int]): Number of grid points in x and y directions.
+        NG: Number of grid points in each dimension (currently same in all dimensions).
         N (int): Number of particles.
         Q (float): Particle charge.
-        L (tuple[float, float]): Domain lengths in x and y.
+        L (cp.ndarray): Domain lengths in each dimension as an array.
         wp (float, optional): Particle weights. Default is 1.
 
     Returns:
@@ -122,14 +123,170 @@ def specInterpolate(XP: cp.ndarray, Shat: cp.ndarray, NG: tuple[int, int], N: in
         - Uses NUFFT (non-uniform FFT) to map irregular particle positions to uniform Fourier grid.
         - Useful in spectral Poisson solvers or FNO-based PIC implementations.
     """
-    rhoHat = cp.conjugate(
-        Q * Shat * finufft.nufft2d1(
-            XP[0] * 2 * cp.pi / L[0],
-            XP[1] * 2 * cp.pi / L[1],
-            0j + cp.zeros(N) + wp,
-            tuple(NG),
-            eps=1e-12,
-            modeord=1
-        )
-    )
+    if dim == 1:
+        rhoHat = Q * SHat * (cufinufft.nufft1d1(
+                XP[0] * 2 * cp.pi / L[0],
+                0j + cp.zeros(N) + wp,
+                n_modes=NG,
+                eps=1e-12,
+                isign=-1,
+                modeord=1)) / L[0]
+
+    else:
+        rhoHat = Q * SHat * (cufinufft.nufft2d1(
+                XP[0] * 2 * cp.pi / L[0],
+                XP[1] * 2 * cp.pi / L[1],
+                0j + cp.zeros(N) + wp,
+                n_modes=(NG,NG),
+                eps=1e-12,
+                isign=-1,
+                modeord=1)) / (L[0] * L[1])
+
     return rhoHat
+
+
+def gatherFourier(XP, EHat, SHat, QM, L, dim, wp=1):
+    if dim == 1:
+        coeff1 = EHat * SHat
+        Ep = cp.real(cufinufft.nufft1d2(XP[0] * 2 * cp.pi / L[0], coeff1, eps=1e-12, isign=1, modeord=1))
+        a = (QM / wp) * Ep
+    else:
+        coeff1 = EHat[0] * SHat
+        Exp = cp.real(cufinufft.nufft2d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], coeff1, eps=1e-12, isign=1, modeord=1))
+        coeff2 = EHat[1] * SHat
+        Eyp = cp.real(cufinufft.nufft2d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], coeff2, eps=1e-12, isign=1, modeord=1))
+        a1 = (QM / wp) * Exp
+        a2 = (QM / wp) * Eyp
+        Ep = cp.stack([Exp, Eyp], axis=0)
+        a = cp.stack([a1, a2], axis=0)
+        
+
+    return Ep, a
+
+
+def p2g_g2p_nostencil_arrays(XP, DX, NG, L, dim,
+                             Q=None, rho_back=0.0,
+                             E=None, QM=None,
+                             return_Ep=True):
+    """
+    Unified matrix-free PIC scatter/gather without 3N/9N arrays.
+
+    Fully vectorized on GPU, works for 1D and 2D.
+    """
+    #N = wp.shape[0]
+    #wp = wp.astype(dtype, copy=False)
+
+    rho = None
+    Ep = None
+    a = None
+
+    if dim == 1:
+        x = XP
+        NGx = int(NG)
+        dx = float(DX[0])
+
+        # primary grid index
+        g1 = cp.floor(x / dx).astype(cp.int32)
+        #For periodic wrapping
+        g = cp.stack([g1 - 1, g1, g1 + 1], axis=0) % NGx
+
+        delta = x % dx
+        w0 = (1.0 - delta) ** 2 / 2.0
+        w2 = delta ** 2 / 2.0
+        w1 = 1.0 - (w0 + w2)
+
+        if Q is not None:
+            rho = cp.zeros(NGx)
+            scatter_add(rho, g[0], w0)
+            scatter_add(rho, g[1], w1)
+            scatter_add(rho, g[2], w2)
+            rho = (Q / dx) * rho + rho_back
+
+        if E is not None:
+            Egrid = E.reshape(-1)
+            # gather & accumulate per stencil
+            Ep_vals = w0*Egrid[g[0]] + w1*Egrid[g[1]] + w2*Egrid[g[2]]
+            Ep_ = Ep_vals
+            Ep = Ep_.astype(cp.float32) if return_Ep else None
+            if QM is not None:
+                a = QM * Ep_
+            else:
+                a = None
+
+        return rho, Ep, a
+
+    elif dim == 2:
+        x = XP[0,:]
+        y = XP[1,:]
+        NGx, NGy = int(NG), int(NG)
+        dx, dy = float(DX[0]), float(DX[1])
+
+        gx0 = cp.floor(x / dx).astype(cp.int32)
+        gy0 = cp.floor(y / dy).astype(cp.int32)
+
+        #For periodic wrapping
+        gx = cp.stack([gx0-1, gx0, gx0+1], axis=0) % NGx
+        gy = cp.stack([gy0-1, gy0, gy0+1], axis=0) % NGy
+        
+        a_ = x % dx
+        b_ = y % dy
+        tot = (dx*dy)**2
+
+        c1 = (dx - a_)**2
+        c2 = (dy - b_)**2
+        c3 = dx**2 + 2*dx*a_ - 2*a_**2
+        c4 = dy**2 + 2*dy*b_ - 2*b_**2
+
+        # stencil weights
+        A = c1*c2/(4*tot)
+        B = c2*c3/(4*tot)
+        C = a_**2*c2/(4*tot)
+        D = c1*c4/(4*tot)
+        F = a_**2*c4/(4*tot)
+        G = b_**2*c1/(4*tot)
+        H = b_**2*c3/(4*tot)
+        I = a_**2*b_**2/(4*tot)
+        E0 = 1 - A - B - C - D - F - G - H - I
+
+        if Q is not None:
+            rho_flat = cp.zeros(NGx*NGy)
+
+            def flat(ix, iy): return NGy*ix + iy
+
+            # scatter each stencil individually
+            scatter_add(rho_flat, flat(gx[0], gy[0]), A)
+            scatter_add(rho_flat, flat(gx[1], gy[0]), B)
+            scatter_add(rho_flat, flat(gx[2], gy[0]), C)
+            scatter_add(rho_flat, flat(gx[0], gy[1]), D)
+            scatter_add(rho_flat, flat(gx[1], gy[1]), E0)
+            scatter_add(rho_flat, flat(gx[2], gy[1]), F)
+            scatter_add(rho_flat, flat(gx[0], gy[2]), G)
+            scatter_add(rho_flat, flat(gx[1], gy[2]), H)
+            scatter_add(rho_flat, flat(gx[2], gy[2]), I)
+
+            rho = (Q / (dx*dy)) * rho_flat.reshape(NGx, NGy) + rho_back
+
+        if E is not None:
+            Ex = E[0].reshape(-1)
+            Ey = E[1].reshape(-1)
+            def flat(ix, iy): return NGy*ix + iy
+
+            # accumulate stencil contributions directly
+            Exp = (A*Ex[flat(gx[0],gy[0])] + B*Ex[flat(gx[1],gy[0])] + C*Ex[flat(gx[2],gy[0])] +
+                   D*Ex[flat(gx[0],gy[1])] + E0*Ex[flat(gx[1],gy[1])] + F*Ex[flat(gx[2],gy[1])] +
+                   G*Ex[flat(gx[0],gy[2])] + H*Ex[flat(gx[1],gy[2])] + I*Ex[flat(gx[2],gy[2])])
+
+            Eyp = (A*Ey[flat(gx[0],gy[0])] + B*Ey[flat(gx[1],gy[0])] + C*Ey[flat(gx[2],gy[0])] +
+                   D*Ey[flat(gx[0],gy[1])] + E0*Ey[flat(gx[1],gy[1])] + F*Ey[flat(gx[2],gy[1])] +
+                   G*Ey[flat(gx[0],gy[2])] + H*Ey[flat(gx[1],gy[2])] + I*Ey[flat(gx[2],gy[2])])
+
+            if return_Ep:
+                Ep = cp.stack([Exp, Eyp], axis=0)
+
+            if QM is not None:
+                a = QM * cp.stack([Exp,Eyp], axis=0)
+
+        return rho, Ep, a
+
+    else:
+        raise ValueError("dim must be 1 or 2")

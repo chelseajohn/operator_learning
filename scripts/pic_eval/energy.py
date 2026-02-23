@@ -6,8 +6,9 @@ from pathlib import Path
 base_path = Path(__file__).resolve().parents[1]
 sys.path.append(str(base_path))
 import numpy as np
+import cupy as cp
 
-def kinetic(vp: np.ndarray, Q: float, QM: float = -1, wp: float = 1, dim: int = 1) -> float:
+def kinetic(vp: cp.ndarray, Q: float, QM: float = -1, wp: float = 1, dim: int = 1) -> float:
     """
     Compute the total kinetic energy of particles.
 
@@ -22,9 +23,9 @@ def kinetic(vp: np.ndarray, Q: float, QM: float = -1, wp: float = 1, dim: int = 
         float: Total kinetic energy of the system.
     """
     if dim == 1:
-        return np.sum(Q * wp * vp ** 2 * 0.5  / QM)
+        return cp.sum(Q * wp * vp ** 2 * 0.5  / QM)
     else:
-        return np.sum(Q * wp * np.sum(vp ** 2, axis=1) * 0.5  / QM)
+        return cp.sum(Q * wp * cp.sum(vp ** 2, axis=1) * 0.5  / QM)
 
 
 def potential(rho: np.ndarray, phi: np.ndarray, dx: np.ndarray, dim:int = 1) -> float:

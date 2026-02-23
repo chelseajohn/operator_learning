@@ -131,7 +131,8 @@ def normalize_per_sample(data: cp.ndarray) -> cp.ndarray:
     data_max = data.max(axis=1, keepdims=True)
     #denom = cp.where(data_max > data_min, data_max - data_min, 1.0)
     denom = np.where(data_max > data_min, data_max - data_min, 1.0)
-    return (data - data_min) / denom
+    new_data = (data - data_min) / denom
+    return new_data
 
 
 def normalize_global_zscore(data: np.ndarray) -> Tuple[np.ndarray, float, float]:
@@ -159,7 +160,11 @@ def load_h5Dataset(file_path: str, keys: List[str], iEnd: Optional[int] = None, 
     datasets = []
     with h5py.File(file_path, "r") as f:
         for key in keys:
-            data = f[key][:(iEnd if key == 'pos_weakLandau' or key == 'Eout_weakLandau' else None):step, :]
+            #data = f[key][:(iEnd if key == 'pos_weakLandau' or key == 'Eout_weakLandau' else None):step, :]
+            #if (key == 'pos_tsi_pif_500k' or key == 'Eout_tsi_pif_500k'):
+            #    data = f[key][iEnd:None:1, ::step]
+            #else:
+            data = f[key][:iEnd:1, ::step]
             datasets.append(np.array(data, dtype=np.float32))
     return datasets
 
@@ -179,6 +184,15 @@ def createDatasetFromPIC(picFile: str,
                          outScaling: float = 1.0):
     # tested for 1D and 2D
     assert nDim in (1,2), 'tested only for 1D and 2D'
+    #2D PIC + cyclotron PIF dataset
+    #input_keys = ["pos_weakLandau_500k", "pos_strongLandau_500k", "pos_tsi_500k", "pos_bti_500k", "pos_cyclotron_pif_500k"]
+    #output_keys = ["Eout_weakLandau_500k", "Eout_strongLandau_500k", "Eout_tsi_500k", "Eout_bti_500k", "Eout_cyclotron_pif_500k"]
+    
+    #2D PIF dataset
+    #input_keys = ["pos_weakLandau_pif_500k", "pos_strongLandau_pif_500k", "pos_tsi_pif_500k", "pos_bti_pif_500k", "pos_cyclotron_pif_500k"]
+    #output_keys = ["Eout_weakLandau_pif_500k", "Eout_strongLandau_pif_500k", "Eout_tsi_pif_500k", "Eout_bti_pif_500k", "Eout_cyclotron_pif_500k"]
+    
+    #1D PIF dataset
     input_keys = ["pos_weakLandau", "pos_strongLandau", "pos_tsi", "pos_bti"]
     output_keys = ["Eout_weakLandau", "Eout_strongLandau", "Eout_tsi", "Eout_bti"]
 
@@ -190,7 +204,8 @@ def createDatasetFromPIC(picFile: str,
     inp = np.concatenate(inputs_list, axis=0) # 1D: (timestep, position), 2D: (timestep, position, dim)
     outp = np.concatenate(outputs_list, axis=0)  # 1D: (timstep, electricField), 2D: (timestep, electricField, dim)
     if nDim == 1:
-        outputs = outp[:, np.newaxis, :]  # timestep, channel=1, electricField)
+        inp = inp[:, np.newaxis, :]  # timestep, channel=1, position
+        outputs = outp[:, np.newaxis, :]  # timestep, channel=1, electricField
     else:
         inp = inp.swapaxes(-1,-2)  # (timstep, channel=dim, position)
         outputs = outp.swapaxes(-1,-2)   # (timstep, channel=dim, electricField)
@@ -198,21 +213,16 @@ def createDatasetFromPIC(picFile: str,
 
     # Build Q array
     q1_xsize = sum(t.shape[0] for t in inputs_list[:3])
-    q1_ysize = inputs_list[0].shape[1]
-    q1 = np.full((q1_xsize, q1_ysize), -4 * np.pi, dtype=np.float32)
-    q2 = np.full((inputs_list[-1].shape[0], inputs_list[-1].shape[1]), -2 * np.pi / 0.21, dtype=np.float32)
-    Q = np.concatenate((q1, q2), axis=0)  # (timestep, position)
-    # Stack Q as extra channel
-    # shape: (timestep, dim+1, features); features: position, charge
-    if nDim == 1:
-        inputs = np.stack([inp, Q], axis=1)
-    else:
-        Q_new = Q[:, np.newaxis, :] # (timestep, 1, position)
-        inputs = np.concatenate((inp, Q_new), axis=1)
+    # Scale by \alpha = Q_tot for 1D and \alpha = Q_tot / sqrt(L_x*L_y) for 2D. For our case all of them boil down to 
+    # \alpha = -L irrespective of dimensions
+    outputs[:q1_xsize,:,:] = outputs[:q1_xsize,:,:] / (-(2 * np.pi / 0.5))
+    outputs[q1_xsize:(q1_xsize + inputs_list[3].shape[0]),:,:] = outputs[q1_xsize:(q1_xsize + inputs_list[3].shape[0]),:,:] / (-(2 * np.pi / 0.21))
+    #outputs[(q1_xsize + inputs_list[3].shape[0]):,:,:] = outputs[(q1_xsize + inputs_list[3].shape[0]):,:,:] / (-1)
 
     # Shuffle timestep
+    inputs = inp
     perm = np.random.permutation(inputs.shape[0])
-    inputs = inputs[perm]      # shape: (timestep, dim+1, features)
+    inputs = inputs[perm]      # shape: (timestep, dim, features)
     outputs = outputs[perm]    # shape: (timestep, dim, field)
 
     # Normalize

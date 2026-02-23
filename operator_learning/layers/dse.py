@@ -25,21 +25,13 @@ class SpectralConv_dse(nn.Module):
         else:
             self.TP_enabled = False
       
-        # self.kX_sym = int(kX/2) + 1
-        # self.kX_sym = int(kX/2)
-        # weights1 = self.scale * torch.rand(dv, dv, self.kX_sym, dtype=torch.cfloat)
-        # weights2 = self.scale * torch.rand(dv, dv, self.kX_sym, dtype=torch.cfloat)
-        # self.R1 = nn.Parameter(format_complexTensor(weights1))
-        # self.R2 = nn.Parameter(format_complexTensor(weights2))
 
         if dim == 1:
-            weights = self.scale * torch.rand(dv, dv, kX, dtype=torch.cfloat)
+            weights = self.scale * torch.rand(dv, dv, 2*self.kX, dtype=torch.cfloat)
             self.R = nn.Parameter(format_complexTensor(weights))
         else:
-            weights1 = self.scale * torch.rand(dv, dv, kX, kY, dtype=torch.cfloat)
-            weights2 = self.scale * torch.rand(dv, dv, kX, kY, dtype=torch.cfloat)
-            self.R1 = nn.Parameter(format_complexTensor(weights1))
-            self.R2 = nn.Parameter(format_complexTensor(weights2))
+            weights = self.scale * torch.rand(dv, dv, 2*self.kX, 2*self.kY, dtype=torch.cfloat)
+            self.R = nn.Parameter(format_complexTensor(weights))
 
         if bias:
             init_std = (2/(dv * dim))**0.5
@@ -95,27 +87,9 @@ class SpectralConv_dse(nn.Module):
         if self.dim == 1:
             out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, kX]
         else:
-            # Reshape Fourier coefficients into (kx, ky) grid
-            # Apply learned complex weights:R1 for positive kx,R2 for negative kx
-            # Only operate on half of ky (to exploit FFT symmetry)
-            # Reconstruct the other half via conjugate symmetry
-            # Concatenate back to get full spectrum
-
-            x_ft = torch.reshape(x_ft, (batchsize, self.channel, 2*self.kX, 2*self.kY-1))  # [batchsize, dv, 2*kX, 2*kY-1]
-            out_ft = torch.zeros(batchsize, self.channel, 2*self.kX, self.kY, dtype=dtype, device=x.device) #[batchsize, dv, 2*kX, kY]
-            out_ft[:, :, :self.kX, :self.kY] = self.compl_mul(x_ft[:, :, :self.kX, :self.kY], self.R1)
-            ## Seems weight1 and weight2 are for positive and negative modes (in x or first dimension) but why different weights?
-            out_ft[:, :, -self.kX:, :self.kY] = self.compl_mul(x_ft[:, :, -self.kX:, :self.kY], self.R2) 
-            x_ft1 = torch.reshape(out_ft, (batchsize, self.channel, 2*self.kX*self.kY))  # [batchsize, dv, 2*kX*kY]
-            
-            ## Take advantage of real input data and the FFT has complex conjugate symmetry and hence the flip and conj
-            if dtype == torch.cfloat:
-                x_ft2 = x_ft1[..., 2 * self.kX:].flip(-1, -2).conj()
-            else:
-                # flip not supported for complexHalf
-                x_ft2 = x_ft1[..., 2 * self.kX:].to(torch.complex64).flip(-1, -2).conj().to(out_ft.dtype)
-
-            out_ft = torch.cat([x_ft1, x_ft2], dim=-1) # [batchsize, dv, 2*kX*(2*kY - 1)]
+            x_ft = torch.reshape(x_ft, (batchsize, self.channel, 2*self.kX, 2*self.kY))  # [batchsize, dv, 2*kX, 2*kY]
+            out_ft = self.compl_mul(x_ft, self.R)
+            out_ft = torch.reshape(out_ft, (batchsize, self.channel, 2*self.kX*(2*self.kY)))  # [batchsize, dv, 2*kX, 2*kY]
      
 
         # Return to physical space
