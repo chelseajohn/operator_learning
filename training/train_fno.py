@@ -458,7 +458,7 @@ class FourierNeuralOperator:
 
         scheduler_step(scheduler)
         avg_loss = total_loss / nBatches
-        #avg_loss = total_loss / len(self.trainLoader.dataset)
+        # avg_loss = total_loss / len(self.trainLoader.dataset)
 
         if self.DDP_enabled:
             if self.enable_profile:
@@ -473,7 +473,7 @@ class FourierNeuralOperator:
         train_loss = avg_loss.item()  # loss per gpu
         self.losses["model"]["train"] = train_loss
         self.gradientNormEpoch = gradsEpoch / nBatches
-        print_rank0(f"Train Epoch {self.epochs}: Avg Loss={train_loss:.4e} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
+        print_rank0(f"Train Epoch {self.epochs}: AvgLoss={train_loss:.4e} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
 
         if self.benchmark:
             print_rank0(f"CUDA Memory for Fwd Pass - Allocated: {mean(fwd_peak_mem):.2f} MB")
@@ -544,24 +544,24 @@ class FourierNeuralOperator:
                 local_loss = self.lossFunction(pred,ref)
                 error = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))/torch.mean(torch.abs(ref.flatten(start_dim=1))) * 100
                 local_errors[iBatch] = error.detach()
-                # if self.TP_enabled:
-                #     # only for logging 
-                #     loss_tensor = local_loss.detach().clone()
-                #     dist.all_reduce(loss_tensor, 
-                #                     op=dist.ReduceOp.AVG,
-                #                     group=self.tp_mesh.get_group())
-                #     total_loss += loss_tensor
+                if self.TP_enabled:
+                    # only for logging 
+                    loss_tensor = local_loss.detach().clone()
+                    dist.all_reduce(loss_tensor, 
+                                    op=dist.ReduceOp.AVG,
+                                    group=self.tp_mesh.get_group())
+                    total_loss += loss_tensor
 
-                #     error_tensor = error.detach().clone()
-                #     dist.all_reduce(error_tensor,
-                #                     op=dist.ReduceOp.AVG,
-                #                     group=self.tp_mesh.get_group())
-                #     relative_error += error_tensor
-                #     # if iBatch % 10 == 0:
-                #     #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {loss_tensor} tp_error: {error_tensor}\n")
-                # else:
-                total_loss += local_loss.detach()
-                relative_error += error.detach()
+                    error_tensor = error.detach().clone()
+                    dist.all_reduce(error_tensor,
+                                    op=dist.ReduceOp.AVG,
+                                    group=self.tp_mesh.get_group())
+                    relative_error += error_tensor
+                     # if iBatch % 10 == 0:
+                     #      print_rank0(f"Train Epoch {self.epochs}: tp_loss: {loss_tensor} tp_error: {error_tensor}\n")
+                else:
+                    total_loss += local_loss.detach()
+                    relative_error += error.detach()
                 # if self.enable_profile:
                 #     nvtx.range_pop() # end loss
                 #     nvtx.range_pop() # end batch
@@ -580,13 +580,13 @@ class FourierNeuralOperator:
             dist.all_reduce(relative_error,
                             op=dist.ReduceOp.AVG, 
                             group=self.dp_group)
-            # local_errors = local_errors.to(self.device)
-            # out = torch.zeros(self.world_size * local_errors.numel(),
-            #                   device=local_errors.device,
-            #                   dtype=local_errors.dtype)
-            # dist.all_gather_into_tensor(out, local_errors)
-            # median_error = out.median().item()
-            median_error = 0.0
+            local_errors = local_errors.to(self.device)
+            out = torch.zeros(self.world_size * local_errors.numel(),
+                              device=local_errors.device,
+                              dtype=local_errors.dtype)
+            dist.all_gather_into_tensor(out, local_errors)
+            median_error = out.median().item()
+            # median_error = 0.0
             if self.enable_profile:
                 nvtx.range_pop() # end ddploss
         else:
@@ -595,7 +595,7 @@ class FourierNeuralOperator:
         val_loss = avg_loss.item() # loss per gpu
         val_error = relative_error.item()
         self.losses["model"]["valid"] = val_loss
-        print_rank0(f"Validation Epoch {self.epochs}: Avg Loss={val_loss:.4e} Test Error={val_error:.2f}% Median Test Error={median_error:.4f}% (id: {idLoss:>7f})\n")
+        print_rank0(f"Validation Epoch {self.epochs}: AvgLoss={val_loss:.4e} TestError={val_error:.2f}% MedianTestError={median_error:.4f}% (id: {idLoss:>7f})\n")
 
     def learn(self, nEpoch, save_interval=100):
         self.epochs += 1

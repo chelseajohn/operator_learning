@@ -80,9 +80,7 @@ class SpectralConv_dse(nn.Module):
 
         # Transform to fourier space
         # Fourier coeffs (complex)
-        x = x.permute(0, 2, 1)  # [batchsize, nParticle, dv]
-        x_ft = transform.forward(x.to(dtype))  # [batchsize, modes, dv]
-        x_ft = x_ft.permute(0, 2, 1) # [batchsize, dv, modes]
+        x_ft = transform.forward(x.to(dtype))  # [batchsize, dv, modes]
        
         if self.TP_enabled:
             torch.distributed.all_reduce(x_ft, group=self.device_mesh.get_group())
@@ -95,9 +93,7 @@ class SpectralConv_dse(nn.Module):
             out_ft = torch.reshape(out_ft, (batchsize, self.channel, 2*self.kX*(2*self.kY)))  # [batchsize, dv, modes]
      
         # Return to physical space
-        out_ft = out_ft.permute(0, 2, 1) # [batchsize, modes, dv]
-        x  = transform.inverse(out_ft)   # [batchsize, nParticle, dv]
-        x = x.permute(0, 2, 1)           # [batchsize, dv, nParticle]
+        x  = transform.inverse(out_ft)   # [batchsize, dv, nParticle]
         x = x / x.size(-1) * self.dim 
 
         if self.bias is not None:
