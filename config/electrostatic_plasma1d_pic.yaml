@@ -36,9 +36,10 @@ model:
   channel_mlp_expansion: 4
   use_skip_connection: false
   skip_type: soft-gating
-  use_dse: true                        # Direct Spectral Evaluation
+  use_dse: true                         # Direct Spectral Evaluation
   use_kb: false                         # Kaiser-Bessel NUFFT
   use_toeplitz: false                   # Toeplitz NUFFT
+  matrix_free: false
 
 
 optim:
@@ -58,7 +59,9 @@ loss:
   # absolute: false
   
 parallel_strategy:
-  ddp: false                    # Distributed Data Parallel
+  ddp: true      # Distributed Data Parallel
+  tp : true      # Tensor Parallel(Only for PIC-DSE)
+  tp_size: 2     # must be divisible by nParticle          
   gpus_per_node: 4
 
 train:

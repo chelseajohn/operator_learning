@@ -1,4 +1,6 @@
 import torch
+from operator_learning.utils.misc import einsum_complexhalf
+
 class VandermondeTransform:
     """
     Class for 1,2-dimensional Fourier transforms on a nonequispaced lattice of data
@@ -38,11 +40,11 @@ class VandermondeTransform:
 
             # flatten to [B, m, N]
             forward_mat = torch.exp(-1j * X)
-
-            inverse_mat = torch.conj(forward_mat).permute(0,2,1)
+            inverse_mat = torch.conj(forward_mat)
 
         return forward_mat, inverse_mat
-    
+              
+            
     def make_2Dmatrix(self):
         
         with torch.no_grad():
@@ -54,36 +56,52 @@ class VandermondeTransform:
 
             # make grid: [B, 2kX, 2kY, N]
             phase = X[:, :, None, :] + Y[:, None, :, :]
-            #The following permutation is only needed for using old model weights which were trained with that
-            #convention. If we are training a new model from scratch then this is not needed. 
+            # The following permutation is only needed for using old model weights which were trained with that
+            # convention. If we are training a new model from scratch then this is not needed. 
             phase = phase.permute(0, 2, 1, 3)              # [B, Ky, Kx, N]
 
             # flatten to [B, m, N]
             forward_mat = torch.exp(-1j * phase).reshape(self.batch_size, m, self.number_points)
-            inverse_mat = torch.conj(forward_mat).permute(0,2,1)
-            #X_mat = torch.bmm(self.X_, self.x_positions[:,None,:]).repeat(1, self.kY*2, 1).to(self.device)
-            #Y_mat = (torch.bmm(self.Y_, self.y_positions[:,None,:]).repeat(1, 1, self.kX*2).reshape(self.batch_size,m,self.number_points)).to(self.device)
-            #forward_mat = torch.exp(-1j* (X_mat+Y_mat)).to(dtype=torch.cfloat, device=self.device) # [batchsize, m, nParticles]
+            inverse_mat = torch.conj(forward_mat)
+            # X_mat = torch.bmm(self.X_, self.x_positions[:,None,:]).repeat(1, self.kY*2, 1).to(self.device)
+            # Y_mat = (torch.bmm(self.Y_, self.y_positions[:,None,:]).repeat(1, 1, self.kX*2).reshape(self.batch_size,m,self.number_points)).to(self.device)
+            # forward_mat = torch.exp(-1j* (X_mat+Y_mat)).to(dtype=torch.cfloat, device=self.device) # [batchsize, m, nParticles]
 
         return forward_mat, inverse_mat
     
     def forward(self, data):
         """
-        data: [batchsize, nParticle, dv]
-        returns: [batchsize, modes, dv]
+        data: [batchsize, dv, nParticle]
+        returns: [batchsize, dv, modes]
         """
 
         if data.device != self.device:
             data = data.to(self.device)
-    
-        return torch.bmm(self.Vt, data)  
+              
+        # torch.bmm does not support complexHalf
+        # 1D: [batchsize, dv, nParticle] x [batchsize, nParticle, kX]
+        # 2D: [batchsize, dv, nParticle] x [batchsize, nParticle, modes]
+        if data.dtype == torch.complex32:
+            data_fwd = einsum_complexhalf('bcp,bpk->bck', data, self.Vt.permute(0,2,1))
+        else:
+            data_fwd = torch.bmm(data, self.Vt.permute(0,2,1))  
+
+        return data_fwd
         
     def inverse(self, data):
         """
-        data: [batchsize, modes, dv,]
-        returns: [batchsize, nParticle, dv]
+        data: [batchsize, dv, modes]
+        returns: [batchsize, dv, nParticle]
         """
-      
-        return torch.bmm(self.Vc, data) 
+
+        # torch.bmm does not support complexHalf
+        # 1D data: [batchsize, dv, kX] x [batchsize, kX, nParticle]
+        # 2D data: [batchsize, dv, modes] x [batchsize, modes, nParticle]
+        if data.dtype == torch.complex32:
+            data_inv = einsum_complexhalf('bck,bkp->bcp', data, self.Vc)
+        else:
+            data_inv = torch.bmm(data, self.Vc) 
+
+        return data_inv
         
 

@@ -10,7 +10,7 @@ from .mlp import MLP
 
 class SpectralConv_dse(nn.Module):
     def __init__(self, dv, kX, kY=None, dataClass='pic', bias=False, 
-                 dim=1, use_complex_amp=False):
+                 dim=1, use_complex_amp=False, device_mesh=None):
         super().__init__()
         assert dim in (1,2), "implemented only for PIC1D and PIC2D"
         self.dim = dim
@@ -19,6 +19,13 @@ class SpectralConv_dse(nn.Module):
         self.channel = dv
         self.use_complex_amp = use_complex_amp
         self.scale = 1 / (dv * dv)
+        self.device_mesh = device_mesh
+        if device_mesh is not None and "tp" in device_mesh.mesh_dim_names:
+            self.TP_enabled = True
+            self.tp_size = device_mesh["tp"].size()
+        else:
+            self.TP_enabled = False
+            self.tp_size = 1
       
 
         if dim == 1:
@@ -73,29 +80,24 @@ class SpectralConv_dse(nn.Module):
 
         # Transform to fourier space
         # Fourier coeffs (complex)
-        x = x.permute(0, 2, 1)  # [batchsize, nParticle, dv]
-        x_ft = transform.forward(x.to(dtype))  # [batchsize, modes, dv]
-        x_ft = x_ft.permute(0, 2, 1) # [batchsize, dv, modes]
-
-
+        x_ft = transform.forward(x.to(dtype))  # [batchsize, dv, modes]
+       
+        if self.TP_enabled:
+            torch.distributed.all_reduce(x_ft, group=self.device_mesh.get_group())
+    
         if self.dim == 1:
-            out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, modes]
+            out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, kX]
         else:
             x_ft = torch.reshape(x_ft, (batchsize, self.channel, 2*self.kX, 2*self.kY))  # [batchsize, dv, 2*kX, 2*kY]
             out_ft = self.compl_mul(x_ft, self.R)
-            out_ft = torch.reshape(out_ft, (batchsize, self.channel, 2*self.kX*(2*self.kY)))  # [batchsize, dv, 2*kX, 2*kY]
+            out_ft = torch.reshape(out_ft, (batchsize, self.channel, 2*self.kX*(2*self.kY)))  # [batchsize, dv, modes]
      
-
-        out_ft = out_ft.permute(0, 2, 1) # [batchsize, modes, dv]
-        
         # Return to physical space
-        x  = transform.inverse(out_ft) # [batchsize, nParticle, dv]
-        x = x.permute(0, 2, 1)
-        x = x / x.size(-1) * self.dim  # [batchsize, dv, nParticle]
+        x  = transform.inverse(out_ft)   # [batchsize, dv, nParticle]
+        x = x / x.size(-1) * self.dim 
 
         if self.bias is not None:
             x = x + self.bias
-
 
         return x.real
 
@@ -108,6 +110,7 @@ class DSELayer(nn.Module):
                  bias=False,
                  dim=1,
                  use_complex_amp=False,
+                 device_mesh=None,
                  ):
         super().__init__()
 
@@ -116,8 +119,9 @@ class DSELayer(nn.Module):
             self.sigma = nn.functional.gelu
         else:
             self.sigma = nn.ReLU(inplace=True)
-
-        self.conv = SpectralConv_dse(dv, kX, kY, dataClass, bias, dim, use_complex_amp)
+        
+        self.device_mesh = device_mesh
+        self.conv = SpectralConv_dse(dv, kX, kY, dataClass, bias, dim, use_complex_amp, device_mesh)
     
         # self.W = GridLinear(
         #                inSize=dv, outSize=dv, hiddenSize=None,

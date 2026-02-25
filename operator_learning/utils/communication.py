@@ -122,31 +122,5 @@ class Communicator:
         """
         dist.destroy_process_group()
           
-    def allreduce(self, tensor, async_op: bool=False, op=dist.ReduceOp.SUM):
-        """
-        Allreduce Pytorch tensors using NCCL 
 
-        Args:
-            tensor (torch.tensor): PyTorch tensor to all-reduce
-            async_op (bool, optional): to make async operation
-            op : torch collective operation
-        """
-        return dist.all_reduce(tensor, op, async_op=async_op)
-    
-    def allgather(self, output_tensor, input_tensor, group=None, async_op=False):
-        """
-        Gather tensors from all ranks and put them in a single output tensor
-        
-
-        Args:
-            output_tensor (torch.tensor): Output tensor to accommodate tensor
-                                          elements from all ranks
-            input_tensor (torch.tensor): Tensor to be gathered from current rank,
-                                         input tensors must have the same size across all ranks.
-            group (ProcessGroup, optional): process group to work on. 
-                                            If None, the default process group will be used.
-            async_op (bool, optional): Whether this op should be an async op
-        """
-        return dist.all_gather_into_tensor(output_tensor, input_tensor)
-        
 
