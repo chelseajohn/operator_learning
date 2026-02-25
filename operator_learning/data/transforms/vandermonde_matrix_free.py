@@ -18,7 +18,7 @@ class VandermondeTransformMatrixFree:
                              0)
         self.batch_size = x_positions.shape[0]
         self.number_points = x_positions.shape[1]
-        self.Fx = torch.exp(-1j * self.X_[None, :, None] * self.x_positions[:, None, :]) #(batchsize, dv, nParticle)
+        self.Fx = torch.exp(-1j * self.X_[None, :, None] * self.x_positions[:, None, :]) #(batchsize, 2*kX, nParticle)
 
         if dim == 2:  
             self.kY = kY if kY is not None else kX
@@ -27,13 +27,13 @@ class VandermondeTransformMatrixFree:
                                  0)
             y_positions = y_positions - torch.min(y_positions)
             self.y_positions = y_positions * 6.28 / torch.max(y_positions)
-            self.Fy = torch.exp(-1j * self.Y_[None, :, None] * self.y_positions[:, None, :]) #(batchsize, dv, nParticle)
+            self.Fy = torch.exp(-1j * self.Y_[None, :, None] * self.y_positions[:, None, :]) #(batchsize, 2*kY, nParticle)
                 
     
     def _forward_1d(self, data):
         """
         data: [batchsize, dv, nParticle]  
-        out:  [batchsize, dv, kX] 
+        out:  [batchsize, dv, 2*kX] 
         """
         
         return torch.einsum("bcp,bkp->bck", data, self.Fx)
@@ -41,7 +41,7 @@ class VandermondeTransformMatrixFree:
 
     def _inverse_1d(self, data):
         """
-        data: [batchsize, dv, kX]
+        data: [batchsize, dv, 2*kX]
         out:  [batchsize, dv, nParticle]
         """
      
