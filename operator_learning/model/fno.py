@@ -140,7 +140,7 @@ class FNO(nn.Module):
         if use_dse:
             self.layers = nn.ModuleList(
                 [DSELayer(dv=dv,
-                          kX=kX, kY=kY, dataClass=dataClass,
+                          kX=kX, kY=kY, kZ=kZ, dataClass=dataClass,
                           non_linearity=non_linearity,
                           bias=bias,
                           dim=n_dims,
@@ -200,7 +200,7 @@ class FNO(nn.Module):
         """
         RBC2D/3D:
             x[batchsize, da, nX, nY, (nZ)] -> [batchsize, du, nX, nY, (nZ)] 
-        PIC1D/2D:
+        PIC1D/2D/3D:
             x[batchsize, da, nParticle] -> [batchsize, du, nParticle]
         """
 
@@ -237,7 +237,27 @@ class FNO(nn.Module):
                                                         device=self.device,
                                                         dtype=self.data_type)
             else:
-                raise ValueError("Vandermonde Transform not implemented for 3D")
+                if self.matrix_free:
+                    transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
+                                                       y_positions=x[:,1,:],
+                                                       z_positions=x[:,2,:],
+                                                       kX=self.kX, 
+                                                       kY=self.kY,
+                                                       kZ=self.kZ,
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.data_type)
+                else:
+                    transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                                                        y_positions=x[:,1,:],
+                                                        z_positions=x[:,2,:],
+                                                        kX=self.kX, 
+                                                        kY=self.kY,
+                                                        kZ=self.kZ,
+                                                        dim=self.n_dims,
+                                                        device=self.device,
+                                                        dtype=self.data_type)
+                
 
         # if self.use_toeplitz:
         #     transform_coeff = NUFFTTransform(device=self.device,
@@ -289,10 +309,11 @@ if __name__ == "__main__":
     # Quick script testing
     model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True, use_kb=False, use_toeplitz=False)
     model2D = FNO(da=3, dv=6, du=2, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True, use_kb=False, use_toeplitz=False)
-    model3D = FNO(da=5, dv=10, du=5, n_layers=4, kX=12, kY=12, kZ=12, n_dims=3)
+    model3D = FNO(da=3, dv=32, du=3, n_layers=4, kX=16, kY=16, kZ=16, n_dims=3, use_dse=True, matrix_free=False)
     uIn_1d = torch.rand(5, 2, 100)
     uIn_2d = torch.rand(5, 3, 100)
-    uIn_3d = torch.rand(5, 5, 64, 64, 32)
-    print_rank0(f"FNO1D Model Output:{model1D(uIn_1d).shape}, FNOModel: {model1D}")
-    print_rank0(f"FNO2D Model Output:{model2D(uIn_2d).shape}, FNOModel: {model2D}")
-    print_rank0(f"FNO3D Model Output:{model3D(uIn_3d).shape}, FNOModel: {model3D}")
+    # uIn_3d = torch.rand(5, 5, 64, 64, 32) # rbc
+    uIn_3d = torch.rand(5, 3, 100000)
+    print_rank0(f"FNO1D Model: {model1D.print_size()}\nOutput:{model1D(uIn_1d).shape}, FNOModel: {model1D}")
+    print_rank0(f"FNO2D Model: {model2D.print_size()}\nOutput:{model2D(uIn_2d).shape}, FNOModel: {model2D}")
+    print_rank0(f"FNO3D Model: {model3D.print_size()}\nOutput:{model3D(uIn_3d).shape}, FNOModel: {model3D}")
