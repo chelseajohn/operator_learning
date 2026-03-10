@@ -1,0 +1,103 @@
+simu:
+  picFile: Datasets_3D_electrostatic_plasma/3D_PIF_5_miniapps_500k.h5
+  nDim: 3
+
+sample:
+  iEnd: 600
+  step: 1
+
+data:
+  dataClass: pic
+  outType: solution
+  outScaling: 1
+  space_dim: 3
+  xStep: 1
+  yStep: 1
+  zStep: 1
+  seed: null
+  dataFile: 3d_data.h5
+  trainRatio: 0.8
+  batchSize:  2       # Global Batch size 
+  sampling_mode: None  # [fixed, ordered, random]
+ 
+
+model:
+  da: 3
+  du: 3
+  dv: 32
+  kX: 16
+  kY: 16
+  kZ: 16
+  n_dims: 3
+  n_layers: 4
+  bias: false
+  non_linearity: gelu
+  scaling_layers: 2
+  use_postfnochannel_mlp: false
+  channel_mlp_expansion: 4
+  use_skip_connection: false
+  skip_type: soft-gating
+  use_dse: true                        # Direct Spectral Evaluation
+  use_kb: false                        # Kaiser-Bessel NUFFT
+  use_toeplitz: false                  # Toeplitz NUFFT
+  matrix_free: true
+
+optim:
+  name: adam
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+
+lr_scheduler:
+  # scheduler: CosAnnealingLR
+  # T_max: 50000
+  scheduler: StepLR
+  step_size: 50.0
+  gamma: 0.5
+
+loss:
+  name: L1Loss
+  # absolute: false
+  
+parallel_strategy:
+  ddp: false      # Distributed Data Parallel
+  tp : false      # Tensor Parallel(Only for PIC-DSE)
+  tp_size: 1      # must be divisible by nParticle          
+  gpus_per_node: 1
+
+train:
+  trainDir: pic3d_100k_bs2_gpu1_base_matrixfree
+  epochs: 3                     # nEpochs
+  checkpoint: None  
+  saveInterval: 50
+  disableTensorboard: true
+
+eval:
+  runId: 1
+  imgExt: png
+  evalDir: eval3D_PIF_5_miniapps
+  dim: 2
+  kc : 0.21
+  NG : 32
+  T: 60.0
+  dt: 0.05
+  Vt: 1
+  nParticle: 100000
+  Qm : -1
+  alpha: 0.01
+  testCase: bti
+  ref: pif
+  
+profile:
+  enableProfiler: false
+  profiler: nsys
+  profileDir: nsysProf
+  evalOnly: true
+  input_shape: [1,3,10000]   # relevant only if evalOnly=true or compile_eval=true
+  use_amp: 0
+  use_complex_amp: 0
+  benchmark: true
+  niter: 5
+  compile_eval: 0       
+  compile_train: 0
+  compile_mode: default    # compiler mode 
+ 
