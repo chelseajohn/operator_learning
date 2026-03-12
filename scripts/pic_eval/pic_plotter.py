@@ -15,7 +15,7 @@ from interpolation import interpMatrix, interpolate, p2g_g2p_nostencil_arrays, s
 from landau_decay import period, decayRate
 from energy import potential
 from operator_learning.data.pic_dataset import normalize_per_sample
-from specKernel import specKernel
+from FourierKernels import specKernel, freeSpaceKernelsPIF, freeSpaceKernelsPIC
 
 class PICVisualizer:
     def __init__(self, args):
@@ -41,12 +41,17 @@ class PICVisualizer:
             self.k = np.array([args.kc])
         else:
             self.k = np.array([args.kc, args.kc])
-        self.L = 2*np.pi/self.k                                   # Length of the container  
+        self.testCase = args.testCase
+        if(self.testCase == 'cyclotron'):
+            self.L = np.array([1, 1])
+            self.B0 = cp.array([0,0,300]) # Constant external magnetic field
+        else:
+            self.L = 2*np.pi/self.k # Length of the container  
+
         self.dx = np.array(self.L / self.NG) # cell length 
         self.Ln = cp.asarray(self.L)
         self.dxn = cp.asarray(self.dx)
         self.alpha = args.alpha
-        self.testCase = args.testCase
         
         if self.dim == 1:                                                             
             self.Q = self.L[0]/ (self.QM * self.N)                                 # Charge of a particle                                                    
@@ -57,7 +62,7 @@ class PICVisualizer:
        
 
         #self.xp0,self.vp0 = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim, label=self.testCase)
-        self.xp0,self.vp0 = inv_trans_sampling_gpu(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim, label=self.testCase)
+        self.xp0,self.vp0 = inv_trans_sampling_gpu(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim, label=self.testCase, ref=self.ref)
         print(f"Initial conditions done")
         # Set matplotlib defaults (better figures)
         plt.rcParams.update({
@@ -123,14 +128,23 @@ class PICVisualizer:
         # Time tracking
         times_acc = []
     
-        if(self.ref == 'pif'):
+        if((self.ref == 'pif') and (self.testCase != 'cyclotron')):
             SHat = specKernel(NG=self.NG, L=self.Ln, dx=self.dxn, dim=self.dim)
+
+        if(self.testCase == 'cyclotron'):
+            if(self.ref == 'pif'):
+                SHat, J, T1, T2 = freeSpaceKernelsPIF(NG=self.NG, L=self.Ln)
+            else:
+                J, T1 = freeSpaceKernelsPIC(NG=self.NG, L=self.Ln)
+
 
         for it in range(self.NT):
            
             print(it)
-            #Apply periodic BCs 
-            xp = toPeriodicND(x=xp, L=self.Ln, dim=self.dim)
+            if(self.testCase != 'cyclotron'):
+                #Apply periodic BCs 
+                xp = toPeriodicND(x=xp, L=self.Ln, dim=self.dim)
+
             # Acceleration
             if ml_acc and model is not None:
                 t0 = time.time()
@@ -139,7 +153,7 @@ class PICVisualizer:
                 
                 if(self.dim == 2):
                     inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
-                
+            
                 prediction = model(inputs) # [1, channel=dim, particles]
                 Efieldparticle = prediction.squeeze()
                 if(self.dim == 1):
@@ -153,9 +167,10 @@ class PICVisualizer:
                     Efieldparticle[1] = Efieldparticle[1] * data_output_std[1] + data_output_mean[1]
                     #Scale by normalization factor \alpha = Q_tot / sqrt(L_x * L_y) in 2D for the current problem
                     Efieldparticle[:,:] = Efieldparticle[:,:] * ((self.Q * self.N)/cp.sqrt(self.Ln[0] * self.Ln[1]))
-                    #Subtract volume average of electric field for periodic compatibility 
-                    Efieldparticle[0] = Efieldparticle[0] - ((1/self.N) * cp.sum(Efieldparticle[0]))
-                    Efieldparticle[1] = Efieldparticle[1] - ((1/self.N) * cp.sum(Efieldparticle[1]))
+                    if(self.testCase != 'cyclotron'):
+                        #Subtract volume average of electric field for periodic compatibility 
+                        Efieldparticle[0] = Efieldparticle[0] - ((1/self.N) * cp.sum(Efieldparticle[0]))
+                        Efieldparticle[1] = Efieldparticle[1] - ((1/self.N) * cp.sum(Efieldparticle[1]))
                 
                 a = accelerateML(E=Efieldparticle, wp=wp, QM=self.QM)
                 times_acc.append(time.time() - t0)
@@ -163,33 +178,48 @@ class PICVisualizer:
                 t0 = time.time()
                 if(self.ref == 'pic'):
                     # Interpolation: particle -> grid
-                    rho, _, _ = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=self.NG, L=self.Ln, dim=self.dim, Q=self.Q, rho_back=self.rho_back)
+                    rho, _, _ = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=self.NG, L=self.Ln, dim=self.dim, testCase=self.testCase, Q=self.Q, rho_back=self.rho_back)
                     # Compute fields
-                    phi, Eg = field(rho=rho, L=self.Ln, dim=self.dim)
+                    phi, Eg = field(rho=rho, L=self.Ln, dim=self.dim, J=J, T1=T1, testCase=self.testCase, NG=self.NG)
                     # Interpolation: grid -> particle
-                    _, Efieldparticle, a = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=self.NG, L=self.Ln, dim=self.dim, E=Eg, QM=self.QM)
+                    _, Efieldparticle, a = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=self.NG, L=self.Ln, dim=self.dim, testCase=self.testCase, E=Eg, QM=self.QM)
                 elif(self.ref == 'pif'):
                     # Interpolation: particle -> Fourier space
-                    rhoHat = scatterFourier(XP=xp, SHat=SHat, NG=self.NG, N=self.N, Q=self.Q, L=self.Ln, dim=self.dim)
+                    rhoHat = scatterFourier(XP=xp, SHat=SHat, NG=self.NG, N=self.N, Q=self.Q, L=self.Ln, dim=self.dim, testCase=self.testCase)
                     # Compute fields in Fourier space
-                    phiHat, EHat = fieldInFourier(rhoHat=rhoHat, L=self.Ln, dim=self.dim) 
+                    phiHat, EHat = fieldInFourier(rhoHat=rhoHat, L=self.Ln, dim=self.dim, testCase=self.testCase, ref=self.ref, J=J, T1=T1, Q=self.Q, T2=T2) 
                     # Interpolation fields (in Fourier space) -> particles
-                    Efieldparticle, a = gatherFourier(XP=xp, EHat=EHat, SHat=SHat, QM=self.QM, L=self.Ln, dim=self.dim) 
+                    Efieldparticle, a = gatherFourier(XP=xp, EHat=EHat, SHat=SHat, QM=self.QM, L=self.Ln, dim=self.dim, testCase=self.testCase) 
                 times_acc.append(time.time() - t0)
+           
+            if(self.testCase == 'cyclotron'):
+                if (it%100==0) or (it==(self.NT-1)):
+                    if ml_acc:
+                        if(self.ref == 'pif'):
+                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
+                        else:
+                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
+                    else:
+                        if(self.ref == 'pif'):
+                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
+                        else:
+                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
 
-            vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it)
+            vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it, testCase=self.testCase, B0=self.B0)
             # Update positions and weights
             xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.Ln, it=it)
             if(self.dim == 1):
+                # Mometum: Note since vp is at half time steps the momentum is calculated at these indices rather than integer time steps
                 mom = cp.abs(cp.sum(self.Q * vp / self.QM))
                 # Electric field energy
                 Egpx = cp.sum(Efieldparticle[:] ** 2) * self.Ln[0] / self.N
                 # Compute potential energy
                 Epotential = 0.5 * Egpx
             else:
-                momx = cp.sum(self.Q * vp[0] / self.QM)
-                momy = cp.sum(self.Q * vp[1] / self.QM)
-                mom = cp.sqrt(momx**2 + momy**2)
+                if(self.testCase != 'cyclotron'):
+                    momx = cp.sum(self.Q * vp[0] / self.QM)
+                    momy = cp.sum(self.Q * vp[1] / self.QM)
+                    mom = cp.sqrt(momx**2 + momy**2)
                 # Electric field energy
                 Egpx = cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
                 Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
@@ -205,7 +235,10 @@ class PICVisualizer:
             Exp.append(Egpx.get())
             if(self.dim == 2):
                 Eyp.append(Egpy.get())
-            momentum.append(mom.get())
+            if(self.testCase != 'cyclotron'):
+                momentum.append(mom.get())
+            else:
+                momentum = None
 
         time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
@@ -261,7 +294,7 @@ class PICVisualizer:
 
     def energy(self, ERef=None, EPred=None, EkRef=None, EpRef=None, EkPred=None, EpPred=None):
         plt.figure()
-        filename = self._img_path("landau_energy")
+        filename = self._img_path("Energy")
         if ERef is not None:
             plt.plot(self.times, ERef / ERef[0], label='TotalEnergyRef', color='black')
         if EPred is not None:
@@ -279,7 +312,7 @@ class PICVisualizer:
         plt.xlabel(r'$\omega_p t$')
         plt.legend()
         plt.grid(True)
-        plt.title("Landau Energy")
+        plt.title("Energy")
         plt.tight_layout()
         plt.savefig(f"{self.eval_dir}/{filename}", dpi=200)
         plt.clf()
@@ -299,7 +332,7 @@ class PICVisualizer:
         plt.yscale('log')
         plt.ylabel('Relative Error')
         plt.xlabel(r'$\omega_p t$')
-        plt.title("Error in Energy and Momentum Conservation")
+        plt.title("Error in Conservation")
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
@@ -372,12 +405,12 @@ class PICVisualizer:
 
         # --- 1. Determine the shared color range for Ex and Ey ---
         # For Ex, find the min/max across both predicted and true values
-        vmin_x = min(predicted_efield[:, 0].min(), true_efield[:, 0].min())
-        vmax_x = max(predicted_efield[:, 0].max(), true_efield[:, 0].max())
+        vmin_x = min(predicted_efield[0].min(), true_efield[0].min())
+        vmax_x = max(predicted_efield[0].max(), true_efield[0].max())
         
         # For Ey, do the same
-        vmin_y = min(predicted_efield[:, 1].min(), true_efield[:, 1].min())
-        vmax_y = max(predicted_efield[:, 1].max(), true_efield[:, 1].max())
+        vmin_y = min(predicted_efield[1].min(), true_efield[1].min())
+        vmax_y = max(predicted_efield[1].max(), true_efield[1].max())
 
         # --- 2. Create the 2x2 plot grid ---
         fig, axes = plt.subplots(2, 2, figsize=(13, 12), dpi=150)
@@ -385,12 +418,12 @@ class PICVisualizer:
 
         # --- 3. Plot the Ex comparison (Top Row) ---
         # Predicted Ex
-        sc00 = axes[0, 0].scatter(predicted_positions[:, 0], predicted_positions[:, 1], c=predicted_efield[:, 0], 
+        sc00 = axes[0, 0].scatter(predicted_positions[0], predicted_positions[1], c=predicted_efield[0], 
                                 cmap=cmap, vmin=vmin_x, vmax=vmax_x, s=marker_size, rasterized=True)
         axes[0, 0].set_title('Predicted $E_x$', fontsize=14)
         
         # True Ex
-        sc01 = axes[0, 1].scatter(true_positions[:, 0], true_positions[:, 1], c=true_efield[:, 0], 
+        sc01 = axes[0, 1].scatter(true_positions[0], true_positions[1], c=true_efield[0], 
                                 cmap=cmap, vmin=vmin_x, vmax=vmax_x, s=marker_size, rasterized=True)
         axes[0, 1].set_title('Ground Truth $E_x$', fontsize=14)
 
@@ -399,12 +432,12 @@ class PICVisualizer:
 
         # --- 4. Plot the Ey comparison (Bottom Row) ---
         # Predicted Ey
-        sc10 = axes[1, 0].scatter(predicted_positions[:, 0], predicted_positions[:, 1], c=predicted_efield[:, 1], 
+        sc10 = axes[1, 0].scatter(predicted_positions[0], predicted_positions[1], c=predicted_efield[1], 
                                 cmap=cmap, vmin=vmin_y, vmax=vmax_y, s=marker_size, rasterized=True)
         axes[1, 0].set_title('Predicted $E_y$', fontsize=14)
 
         # True Ey
-        sc11 = axes[1, 1].scatter(true_positions[:, 0], true_positions[:, 1], c=true_efield[:, 1], 
+        sc11 = axes[1, 1].scatter(true_positions[0], true_positions[1], c=true_efield[1], 
                                 cmap=cmap, vmin=vmin_y, vmax=vmax_y, s=marker_size, rasterized=True)
         axes[1, 1].set_title('Ground Truth $E_y$', fontsize=14)
         
@@ -418,6 +451,70 @@ class PICVisualizer:
                 ax.set_ylabel('Particle Y Position')
                 ax.set_aspect('equal', adjustable='box') # Ensure correct spatial aspect ratio
                 ax.grid(True, linestyle='--', alpha=0.5)
+        filename = self._img_path(output_filename)
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)
+        plt.close()
+
+
+    def visualize_Efield(self, positions, efield, timestep, output_filename):
+        """
+        Creates a 2x2 grid of plots showing particle positions colored by E-field values.
+        Top row compares Ex (Predicted vs. True), Bottom row compares Ey.
+        Crucially, it uses a shared color scale for each row to allow direct comparison.
+        """
+        # Use a diverging colormap, which is great for fields (positive/negative values)
+        cmap = 'coolwarm'
+        marker_size = 1 # Use a small marker size for 100k points
+    
+        # --- 1. Determine the shared color range for Ex and Ey ---
+        # For Ex, find the min/max across both predicted and true values
+        vmin_x = efield[0].min()
+        vmax_x = efield[0].max()
+        
+        # For Ey, do the same
+        vmin_y = efield[1].min()
+        vmax_y = efield[1].max()
+    
+        # --- 2. Create the 2x2 plot grid ---
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6), dpi=150)
+        fig.suptitle(f'Spatial E-Field Comparison for Timestep {timestep}', fontsize=20)
+    
+        # --- 3. Plot the Ex comparison (Top Row) ---
+        # Predicted Ex
+        sc00 = axes[0].scatter(positions[0], positions[1], c=efield[0], 
+                                   cmap=cmap, vmin=vmin_x, vmax=vmax_x, s=marker_size, rasterized=True)
+        axes[0].set_title('$E_x$', fontsize=14)
+        
+        # True Ex
+        #sc01 = axes[0, 1].scatter(true_positions[:, 0], true_positions[:, 1], c=true_efield[:, 0], 
+        #                           cmap=cmap, vmin=vmin_x, vmax=vmax_x, s=marker_size, rasterized=True)
+        #axes[0, 1].set_title('Ground Truth $E_x$', fontsize=14)
+    
+        # Add a single colorbar for the Ex row
+        fig.colorbar(sc00, ax=axes[0], label='$E_x$ Value', fraction=0.046, pad=0.04)
+    
+        # --- 4. Plot the Ey comparison (Bottom Row) ---
+        # Predicted Ey
+        sc01 = axes[1].scatter(positions[0], positions[1], c=efield[1], 
+                                   cmap=cmap, vmin=vmin_y, vmax=vmax_y, s=marker_size, rasterized=True)
+        axes[1].set_title('$E_y$', fontsize=14)
+    
+        # True Ey
+        #sc11 = axes[1, 1].scatter(true_positions[:, 0], true_positions[:, 1], c=true_efield[:, 1], 
+        #                           cmap=cmap, vmin=vmin_y, vmax=vmax_y, s=marker_size, rasterized=True)
+        #axes[1, 1].set_title('Ground Truth $E_y$', fontsize=14)
+        
+        # Add a single colorbar for the Ey row
+        fig.colorbar(sc01, ax=axes[1], label='$E_y$ Value', fraction=0.046, pad=0.04)
+    
+        # --- 5. Final plot adjustments ---
+        for ax in axes:
+            ax.set_xlabel('Particle X Position')
+            ax.set_ylabel('Particle Y Position')
+            ax.set_aspect('equal', adjustable='box') # Ensure correct spatial aspect ratio
+            ax.grid(True, linestyle='--', alpha=0.5)
+    
         filename = self._img_path(output_filename)
         plt.tight_layout(rect=[0, 0, 1, 0.96])
         plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)

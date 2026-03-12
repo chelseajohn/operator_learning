@@ -153,7 +153,8 @@ def inv_trans_sampling_gpu(alpha, k, L, N, dim=1,
                            max_iter=12, tol=1e-12,
                            dtype=cp.float64,
                            out_dtype=cp.float64,
-                           label='weakLandau'):
+                           label='weakLandau',
+                           ref='pif'):
     """
     GPU inverse-transform sampling for initial condition generation.
 
@@ -229,8 +230,19 @@ def inv_trans_sampling_gpu(alpha, k, L, N, dim=1,
             VP[dim-1,:ninetypercent] = sigma * cp.random.randn(ninetypercent)
             VP[dim-1,ninetypercent:] =  4.0 + sigma * cp.random.randn(rem)
 
+    elif(label == 'cyclotron'):
+        sigmas = cp.array([Larr[0]/10,Larr[1]/30]) / cp.sqrt(2) # Control the shape of the beam
+        X = cp.random.randn(dim, N) * sigmas
+        if(ref == 'pic'):
+            X = X + cp.array([0.5*Larr[0], 0.5*Larr[1]])
+            X = cp.mod(X, Larr)
 
-    # periodic wrap to [0,L)
-    XP = cp.mod(X, Larr)
+        VP = cp.random.randn(dim, N)
+
+    if(label == 'cyclotron'):
+        XP = X
+    else:
+        # periodic wrap to [0,L)
+        XP = cp.mod(X, Larr)
 
     return XP.astype(out_dtype), VP.astype(out_dtype)
