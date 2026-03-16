@@ -1,9 +1,9 @@
 simu:
-  picFile: Datasets_3D_electrostatic_plasma/3D_PIF_5_miniapps_500k.h5
+  picFile: Datasets_3D_electrostatic_plasma/3D_PIF_sl_penning_100k.h5
   nDim: 3
 
 sample:
-  iEnd: 600
+  iEnd: 601
   step: 1
 
 data:
@@ -15,9 +15,9 @@ data:
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: 3d_data.h5
+  dataFile: Datasets_3D_electrostatic_plasma/PIF3D_sl_penning_100k_QL_normalize.h5
   trainRatio: 0.8
-  batchSize:  2       # Global Batch size 
+  batchSize:  12       # Global Batch size 
   sampling_mode: None  # [fixed, ordered, random]
  
 
@@ -59,14 +59,14 @@ loss:
   # absolute: false
   
 parallel_strategy:
-  ddp: false      # Distributed Data Parallel
-  tp : false      # Tensor Parallel(Only for PIC-DSE)
-  tp_size: 1      # must be divisible by nParticle          
-  gpus_per_node: 1
+  ddp: true        # Distributed Data Parallel
+  tp : false       # Tensor Parallel(Only for PIC-DSE)
+  tp_size: 1       # must be divisible by nParticle          
+  gpus_per_node: 4
 
 train:
-  trainDir: pic3d_100k_bs2_gpu1_base_matrixfree
-  epochs: 3                     # nEpochs
+  trainDir: PIF3D_sl_penning_QL_normalize
+  epochs: 250                     # nEpochs
   checkpoint: None  
   saveInterval: 50
   disableTensorboard: true

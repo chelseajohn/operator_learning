@@ -76,7 +76,7 @@ class VandermondeTransform:
             phase = X[:, :, None, :] + Y[:, None, :, :]
             # The following permutation is only needed for using old model weights which were trained with that
             # convention. If we are training a new model from scratch then this is not needed. 
-            phase = phase.permute(0, 2, 1, 3)              # [B, Ky, Kx, N]
+            phase = phase.permute(0, 2, 1, 3)              # [B, 2Ky, 2Kx, N]
 
             # flatten to [B, m, N]
             forward_mat = torch.exp(-1j * phase).reshape(self.batch_size, m, self.number_points)
