@@ -192,18 +192,18 @@ class PICVisualizer:
                     Efieldparticle, a = gatherFourier(XP=xp, EHat=EHat, SHat=SHat, QM=self.QM, L=self.Ln, dim=self.dim, testCase=self.testCase) 
                 times_acc.append(time.time() - t0)
            
-            if(self.testCase == 'cyclotron'):
-                if (it%100==0) or (it==(self.NT-1)):
-                    if ml_acc:
-                        if(self.ref == 'pif'):
-                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
-                        else:
-                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
-                    else:
-                        if(self.ref == 'pif'):
-                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
-                        else:
-                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
+            #if(self.testCase == 'cyclotron'):
+            #    if (it%100==0) or (it==(self.NT-1)):
+            #        if ml_acc:
+            #            if(self.ref == 'pif'):
+            #                self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
+            #            else:
+            #                self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
+            #        else:
+            #            if(self.ref == 'pif'):
+            #                self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
+            #            else:
+            #                self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
 
             vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it, testCase=self.testCase, B0=self.B0)
             # Update positions and weights
@@ -296,7 +296,7 @@ class PICVisualizer:
         plt.figure()
         filename = self._img_path("Energy")
         if ERef is not None:
-            plt.plot(self.times, ERef / ERef[0], label='TotalEnergyRef', color='black')
+            plt.plot(self.times, ERef / ERef[0], label='TotalEnergyRef', color='orange')
         if EPred is not None:
             plt.plot(self.times, EPred / EPred[0], label='TotalEnergyPred', linestyle="--", color='black')
         if EkRef is not None:
@@ -304,7 +304,7 @@ class PICVisualizer:
         if EkPred is not None:
             plt.plot(self.times, EkPred / EPred[0], label='KEPred', linestyle="--", color='blue')
         if EpRef is not None:
-            plt.plot(self.times, EpRef / ERef[0], label='PERef', color='red')
+            plt.plot(self.times, EpRef / ERef[0], label='PERef', color='green')
         if EpPred is not None:
             plt.plot(self.times, EpPred / EPred[0], label='PEPred', linestyle="--", color='red')
         plt.yscale('log')
