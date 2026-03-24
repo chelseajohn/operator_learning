@@ -234,14 +234,12 @@ def createDatasetFromPIC(picFile: str,
     # Normalize
     inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
     outputs[:, 0, :], meanEx, stdEx = normalize_global_zscore(outputs[:, 0, :])
-    if nDim == 2:
+    if nDim > 1:
          inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
          outputs[:, 1, :], meanEy, stdEy = normalize_global_zscore(outputs[:, 1, :])
-    if nDim == 3:
-         inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
-         outputs[:, 1, :], meanEy, stdEy = normalize_global_zscore(outputs[:, 1, :])
-         inputs[:, 2, :] = normalize_per_sample(inputs[:, 2, :])
-         outputs[:, 2, :], meanEy, stdEy = normalize_global_zscore(outputs[:, 2, :])
+    if nDim > 2:
+        inputs[:, 2, :] = normalize_per_sample(inputs[:, 2, :])
+        outputs[:, 2, :], meanEz, stdEz = normalize_global_zscore(outputs[:, 2, :])
 
     with h5py.File(dataFile, "w") as dataset:
         infoParams = {
@@ -258,11 +256,17 @@ def createDatasetFromPIC(picFile: str,
                 "output_mean": meanEx,
                 "output_std": stdEx
                 })
-        else:
+        elif nDim == 2:
             infoParams.update({
                 "output_mean": (meanEx, meanEy),
                 "output_std": (stdEx, stdEy)
                 })
+        else:
+            infoParams.update({
+                "output_mean": (meanEx, meanEy, meanEz),
+                "output_std": (stdEx, stdEy, stdEz)
+                })
+
         for name, val in infoParams.items():
             try:
                 dataset.create_dataset(f"infos/{name}", data=np.asarray(val))

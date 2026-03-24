@@ -9,23 +9,34 @@ from .linear import GridLinear
 from .mlp import MLP
 
 class SpectralConv_dse(nn.Module):
-    def __init__(self, dv, kX, kY=None, dataClass='pic', bias=False, 
-                 dim=1, use_complex_amp=False):
+    def __init__(self, dv, kX, kY=None, kZ=None, dataClass='pic', bias=False, 
+                 dim=1, use_complex_amp=False, device_mesh=None):
         super().__init__()
-        assert dim in (1,2), "implemented only for PIC1D and PIC2D"
+        assert dim in (1,2, 3), "implemented only for PIC1D, PIC2D and PIC3D"
         self.dim = dim
         self.kX = kX     
         self.kY = kY if kY is not None else kX
+        self.kZ = kZ if kZ is not None else kX
         self.channel = dv
         self.use_complex_amp = use_complex_amp
         self.scale = 1 / (dv * dv)
+        self.device_mesh = device_mesh
+        if device_mesh is not None and "tp" in device_mesh.mesh_dim_names:
+            self.TP_enabled = True
+            self.tp_size = device_mesh["tp"].size()
+        else:
+            self.TP_enabled = False
+            self.tp_size = 1
       
 
         if dim == 1:
             weights = self.scale * torch.rand(dv, dv, 2*self.kX, dtype=torch.cfloat)
             self.R = nn.Parameter(format_complexTensor(weights))
-        else:
+        elif dim == 2:
             weights = self.scale * torch.rand(dv, dv, 2*self.kX, 2*self.kY, dtype=torch.cfloat)
+            self.R = nn.Parameter(format_complexTensor(weights))
+        else:
+            weights = self.scale * torch.rand(dv, dv, 2*self.kX, 2*self.kY, 2*self.kZ, dtype=torch.cfloat)
             self.R = nn.Parameter(format_complexTensor(weights))
 
         if bias:
@@ -41,8 +52,10 @@ class SpectralConv_dse(nn.Module):
         """
         PIC1D: input[batchsize, dv, kX], weights[dv, dv, kX]
         PIC2D: input[batchsize, dv, kX, kY], weights[dv, dv, kX, kY]
+        PIC3D: input[batchsize, dv, kX, kY, kZ], weights[dv, dv, kX, kY, kZ]
         Returns PIC1D: [batchsize, dv, kX]
         Returns PIC2D: [batchsize, dv, kX, kY]
+        Returns PIC3D: [batchsize, dv, kX, kY, kZ]
         """
         
         if self.training and self.use_complex_amp:
@@ -54,13 +67,15 @@ class SpectralConv_dse(nn.Module):
 
         if self.dim == 1:
             return einsum_fn("bik,iok->bok", input, R)
-        else:
+        elif self.dim == 2:
             return einsum_fn("bixy,ioxy->boxy", input, R)
+        else:
+            return einsum_fn("bixyz,ioxyz->boxyz", input, R)
 
         
     def forward(self, x, transform):
         """
-        PIC1D/2D:  x[batchsize, dv, nParticle], 
+        PIC1D/2D/3D:  x[batchsize, dv, nParticle], 
         returns: [batchsize, dv, nParticle]
         """
 
@@ -73,41 +88,41 @@ class SpectralConv_dse(nn.Module):
 
         # Transform to fourier space
         # Fourier coeffs (complex)
-        x = x.permute(0, 2, 1)  # [batchsize, nParticle, dv]
-        x_ft = transform.forward(x.to(dtype))  # [batchsize, modes, dv]
-        x_ft = x_ft.permute(0, 2, 1) # [batchsize, dv, modes]
-
-
+        x_ft = transform.forward(x.to(dtype))  # [batchsize, dv, modes]
+       
+        if self.TP_enabled:
+            torch.distributed.all_reduce(x_ft, group=self.device_mesh.get_group())
+    
         if self.dim == 1:
-            out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, modes]
-        else:
+            out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, kX]
+        elif self.dim == 2:
             x_ft = torch.reshape(x_ft, (batchsize, self.channel, 2*self.kX, 2*self.kY))  # [batchsize, dv, 2*kX, 2*kY]
             out_ft = self.compl_mul(x_ft, self.R)
-            out_ft = torch.reshape(out_ft, (batchsize, self.channel, 2*self.kX*(2*self.kY)))  # [batchsize, dv, 2*kX, 2*kY]
+            out_ft = torch.reshape(out_ft, (batchsize, self.channel, 2*self.kX*(2*self.kY)))  # [batchsize, dv, modes]
+        else:
+            x_ft = torch.reshape(x_ft, (batchsize, self.channel, 2*self.kX, 2*self.kY, 2*self.kZ))  # [batchsize, dv, 2*kX, 2*kY, 2*kZ]
+            out_ft = self.compl_mul(x_ft, self.R)
+            out_ft = torch.reshape(out_ft, (batchsize, self.channel, 2*self.kX*(2*self.kY)*(2*self.kZ)))  # [batchsize, dv, modes]
      
-
-        out_ft = out_ft.permute(0, 2, 1) # [batchsize, modes, dv]
-        
         # Return to physical space
-        x  = transform.inverse(out_ft) # [batchsize, nParticle, dv]
-        x = x.permute(0, 2, 1)
-        x = x / x.size(-1) * self.dim  # [batchsize, dv, nParticle]
+        x  = transform.inverse(out_ft)   # [batchsize, dv, nParticle]
+        x = x / x.size(-1) * self.dim 
 
         if self.bias is not None:
             x = x + self.bias
-
 
         return x.real
 
 
 class DSELayer(nn.Module):
     def __init__(self,dv, 
-                 kX, kY=None,
+                 kX, kY=None, kZ=None,
                  dataClass='pic',
                  non_linearity='gelu',
                  bias=False,
                  dim=1,
                  use_complex_amp=False,
+                 device_mesh=None,
                  ):
         super().__init__()
 
@@ -116,8 +131,9 @@ class DSELayer(nn.Module):
             self.sigma = nn.functional.gelu
         else:
             self.sigma = nn.ReLU(inplace=True)
-
-        self.conv = SpectralConv_dse(dv, kX, kY, dataClass, bias, dim, use_complex_amp)
+        
+        self.device_mesh = device_mesh
+        self.conv = SpectralConv_dse(dv, kX, kY, kZ, dataClass, bias, dim, use_complex_amp, device_mesh)
     
         # self.W = GridLinear(
         #                inSize=dv, outSize=dv, hiddenSize=None,
@@ -135,7 +151,7 @@ class DSELayer(nn.Module):
  
     def forward(self, x, transform):
         """
-        PIC1D/2D: x[batchsize, dv, nParticle]
+        PIC1D/2D/3D: x[batchsize, dv, nParticle]
         Returns: [batchsize, dv, nParticle]
         """
         v = self.conv(x, transform)

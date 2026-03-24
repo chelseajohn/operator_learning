@@ -42,7 +42,21 @@ parallel_strategy:
   gpus_per_node: 4       # Number of GPUs per node
 ```
 
-### 🖥️ Launching DDP Jobs via SLURM
+## Particle Parallel Training For PIC (TP)
+
+For PIC problem, the data can be parallelised along particle dimension (tensor parallel/ input sharding) in addition to time step dimension which is parallelised with DDP as `(timestep/dp_ranks, channels, nparticle/tp_ranks)` 
+
+### 🔧 Enable DDP + TP in Configuration
+Edit your `config.yaml` to include:
+
+```yaml
+parallel_strategy:
+  ddp: true     # Distributed Data Parallel
+  tp : true     # Tensor Parallel(Only for PIC-DSE)
+  tp_size: 2    # must be divisible by nParticle          
+  gpus_per_node: 4
+```
+### 🖥️ Launching Distributed Jobs via SLURM
 
 Distributed jobs can be launched using `torchrun` within a SLURM environment:
 
@@ -51,6 +65,13 @@ Distributed jobs can be launched using `torchrun` within a SLURM environment:
 MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
 MASTER_PORT=6000
 GPUS_PER_NODE=4
+
+###### JSC System specifics #####
+export SRUN_CPUS_PER_TASK=${SLURM_CPUS_PER_TASK}
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export OMP_NUM_THREADS=1
+export NCCL_SOCKET_IFNAME=ib0
+MASTER_ADDR="${MASTER_ADDR}i"
 
 srun python -u -m torch.distributed.run   \
     --nproc_per_node $GPUS_PER_NODE   \
@@ -85,4 +106,4 @@ profile:
 ## Problems Solved
 
 - **Rayleigh-Bénard convection** in 2D/3D using FNO, with datasets generated via the pseudo-spectral solver [Dedalus](https://dedalus-project.readthedocs.io/en/latest/) for 2D and [pySDC](https://zenodo.org/records/15196003) for 3D.
-- **Particle-In-Cell** (1D/2D) algorithm using FNO for electric field prediction
+- **Particle-In-Cell** (1D/2D/3D) algorithm using FNO for electric field prediction

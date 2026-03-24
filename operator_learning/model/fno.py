@@ -9,7 +9,8 @@ from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
 from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer, NUFFTLayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
-#from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
+from operator_learning.data.transforms.vandermonde_matrix_free import VandermondeTransformMatrixFree
+from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
 
 class FNOLayer(nn.Module):
 
@@ -103,7 +104,8 @@ class FNO(nn.Module):
                  use_dse=False,
                  use_toeplitz=False,
                  use_kb=False,
-                 dataset=None,dataClass='pic',
+                 dataset=None,
+                 dataClass='pic',
                  use_complex_amp=False,
                  matrix_free=False,
                  device='cpu',
@@ -122,9 +124,9 @@ class FNO(nn.Module):
 
         # DSE not implemented for 3D
         self.use_dse = use_dse
-        # Toeplitz implemented only for PIC1D
+        # Toeplitz cannot be implemented for PIC
         self.use_toeplitz = use_toeplitz
-        # KB implemented only for PIC1D and PIC2D
+        # KB implemented only for PIC1D 
         self.use_kb = use_kb 
         assert sum([self.use_dse, self.use_toeplitz, self.use_kb]) <= 1, \
             "Exactly one of use_dse, use_toeplitz, or use_kb must be True."
@@ -132,26 +134,29 @@ class FNO(nn.Module):
         self.dataClass = dataClass
         self.dataset = dataset if dataClass == 'rbc' else None
         self.data_type = torch.float16 if use_complex_amp and self.training else torch.float32
+        self.device_mesh = kwargs.get("device_mesh", None)
+        self.matrix_free = matrix_free
 
         if use_dse:
             self.layers = nn.ModuleList(
                 [DSELayer(dv=dv,
-                          kX=kX, kY=kY, dataClass=dataClass,
+                          kX=kX, kY=kY, kZ=kZ, dataClass=dataClass,
                           non_linearity=non_linearity,
                           bias=bias,
                           dim=n_dims,
                           use_complex_amp=use_complex_amp,
+                          device_mesh=self.device_mesh,
                          )
                  for _ in range(n_layers)])
-        elif use_toeplitz:
-            self.layers = nn.ModuleList(
-                [NUFFTLayer(dv=dv, 
-                          kX=kX, dataClass=dataClass,
-                          non_linearity=non_linearity,
-                          bias=bias,
-                          dim=n_dims,
-                          use_complex_amp=use_complex_amp)
-                 for _ in range(n_layers)])
+        # elif use_toeplitz:
+        #     self.layers = nn.ModuleList(
+        #         [NUFFTLayer(dv=dv, 
+        #                   kX=kX, dataClass=dataClass,
+        #                   non_linearity=non_linearity,
+        #                   bias=bias,
+        #                   dim=n_dims,
+        #                   use_complex_amp=use_complex_amp)
+        #          for _ in range(n_layers)])
         elif use_kb:
             self.layers = nn.ModuleList(
                 [NUFFTLayer(dv=dv,
@@ -195,39 +200,78 @@ class FNO(nn.Module):
         """
         RBC2D/3D:
             x[batchsize, da, nX, nY, (nZ)] -> [batchsize, du, nX, nY, (nZ)] 
-        PIC1D/2D:
+        PIC1D/2D/3D:
             x[batchsize, da, nParticle] -> [batchsize, du, nParticle]
         """
 
         if self.use_dse:
             if self.n_dims == 1:
-                transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                if self.matrix_free:
+                    transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
+                                                       kX=self.kX, 
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.data_type
+                                                        )
+                else:
+                    transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                        kX=self.kX, 
                                                        dim=self.n_dims,
                                                        device=self.device,
                                                        dtype=self.data_type)
             elif self.n_dims == 2:
-                transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                if self.matrix_free:
+                    transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
                                                        y_positions=x[:,1,:],
                                                        kX=self.kX, 
                                                        kY=self.kY,
                                                        dim=self.n_dims,
                                                        device=self.device,
                                                        dtype=self.data_type)
+                else:
+                    transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                                                        y_positions=x[:,1,:],
+                                                        kX=self.kX, 
+                                                        kY=self.kY,
+                                                        dim=self.n_dims,
+                                                        device=self.device,
+                                                        dtype=self.data_type)
             else:
-                raise ValueError("Vandermonde Transform not implemented for 3D")
+                if self.matrix_free:
+                    transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
+                                                       y_positions=x[:,1,:],
+                                                       z_positions=x[:,2,:],
+                                                       kX=self.kX, 
+                                                       kY=self.kY,
+                                                       kZ=self.kZ,
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.data_type)
+                else:
+                    transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
+                                                        y_positions=x[:,1,:],
+                                                        z_positions=x[:,2,:],
+                                                        kX=self.kX, 
+                                                        kY=self.kY,
+                                                        kZ=self.kZ,
+                                                        dim=self.n_dims,
+                                                        device=self.device,
+                                                        dtype=self.data_type)
+                
 
-        if self.use_toeplitz:
-            transform_coeff = NUFFTTransform(device=self.device, dataClass='pic', transform='toeplitz', 
-                                       dv=self.dv, kX=self.kX,
-                                       kY=self.kY, dim=self.n_dims, 
-                                       dtype=self.data_type)
+        # if self.use_toeplitz:
+        #     transform_coeff = NUFFTTransform(device=self.device,
+        #                                      dataClass='pic',
+        #                                      transform='toeplitz', 
+        #                                      dim=self.n_dims, 
+        #                                      dtype=self.data_type)
         
         if self.use_kb:
-            transform_coeff = NUFFTTransform(device=self.device, dataClass='pic', transform='kb', 
-                                       dv=self.dv, kX=self.kX,
-                                       kY=self.kY, dim=self.n_dims, 
-                                       dtype=self.data_type)
+            transform_coeff = NUFFTTransform(device=self.device, 
+                                             dataClass='pic',
+                                             transform='kb', 
+                                             dim=self.n_dims, 
+                                             dtype=self.data_type)
 
 
         x = x.permute(0,2,1)
@@ -265,10 +309,11 @@ if __name__ == "__main__":
     # Quick script testing
     model1D = FNO(da=2, dv=4, du=1, n_layers=4, kX=12, n_dims=1, use_dse=True, use_kb=False, use_toeplitz=False)
     model2D = FNO(da=3, dv=6, du=2, n_layers=4, kX=12, kY=12, n_dims=2, use_dse=True, use_kb=False, use_toeplitz=False)
-    model3D = FNO(da=5, dv=10, du=5, n_layers=4, kX=12, kY=12, kZ=12, n_dims=3)
+    model3D = FNO(da=3, dv=32, du=3, n_layers=4, kX=16, kY=16, kZ=16, n_dims=3, use_dse=True, matrix_free=False)
     uIn_1d = torch.rand(5, 2, 100)
     uIn_2d = torch.rand(5, 3, 100)
-    uIn_3d = torch.rand(5, 5, 64, 64, 32)
-    print_rank0(f"FNO1D Model Output:{model1D(uIn_1d).shape}, FNOModel: {model1D}")
-    print_rank0(f"FNO2D Model Output:{model2D(uIn_2d).shape}, FNOModel: {model2D}")
-    print_rank0(f"FNO3D Model Output:{model3D(uIn_3d).shape}, FNOModel: {model3D}")
+    # uIn_3d = torch.rand(5, 5, 64, 64, 32) # rbc
+    uIn_3d = torch.rand(5, 3, 100000)
+    print_rank0(f"FNO1D Model: {model1D.print_size()}\nOutput:{model1D(uIn_1d).shape}, FNOModel: {model1D}")
+    print_rank0(f"FNO2D Model: {model2D.print_size()}\nOutput:{model2D(uIn_2d).shape}, FNOModel: {model2D}")
+    print_rank0(f"FNO3D Model: {model3D.print_size()}\nOutput:{model3D(uIn_3d).shape}, FNOModel: {model3D}")
