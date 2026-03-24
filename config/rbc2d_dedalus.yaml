@@ -83,6 +83,7 @@ train:
   checkpoint: None
   saveInterval: 5
   disableTensorboard: true
+  measure_power: 0             # measure power and energy using jpwr
 
 eval:
   iSimu: 0

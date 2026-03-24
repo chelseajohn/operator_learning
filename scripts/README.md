@@ -6,13 +6,14 @@ The scripts facilitate training FNO models and comprehensive evaluation of train
 Main training script for 1D/2D/3D Fourier Neural Operator models.
 
 **Features:**
-- Supports distributed training with PyTorch
+- Supports distributed and input sharded training with PyTorch
 - Configurable via YAML configuration files
 - Tensorboard logging integration
 - Checkpoint saving and resuming
 - Multiple optimizer and learning rate scheduler options
 - Benchmarking
 - Mixed precision and torch.compile
+- Power and energy measurement
 
 **Usage:**
 ```bash
@@ -32,6 +33,7 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--use_complex_amp` : To use explicit casting of torch.complex64 to torch.complex32
 - `--compile_train`: To compile `train()` with `torch.compile`
 - `--compile_mode` : `torch.compile` mode ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']
+- `--measure_power`: To measure power and energy during training on GPU using [jpwr](https://github.com/FZJ-JSC/jpwr)
 
 # Rayleigh Benard Convection (RBC) Evaluation
 Comprehensive evaluation script for trained FNO models with detailed analysis and visualization for Rayleigh Benard Convection
@@ -72,7 +74,7 @@ The scripts work with HDF5 datasets containing:
 - `xGrid`, `yGrid`: Spatial grid coordinates (if available)
 
 # Particle In Cell (PIC) Evaluation
-Comprehensive evaluation script for trained FNO models with visualization for PIC in 1D/2D
+Comprehensive evaluation script for trained FNO models with visualization for PIC in 1D/2D/3D
 
 **Usage:**
 ```bash

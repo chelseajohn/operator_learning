@@ -9,7 +9,7 @@ import argparse
 import torch
 import torch.multiprocessing as mp
 from training.train_fno import FourierNeuralOperator
-from operator_learning.utils.misc import readConfig, print_rank0, enable_tf32_only_on_a100
+from operator_learning.utils.misc import readConfig, print_rank0, enable_tf32_only_on_a100, slugify
 import numpy as np
 
 
@@ -46,6 +46,8 @@ parser.add_argument(
     "--compile_mode", type=str, default="default", 
     help="compile options ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']")
 parser.add_argument(
+    "--measure_power", type=int, default=0, help="use jpwr for power measurement during training [0:False, 1:True]")
+parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
 args = parser.parse_args()
 
@@ -59,6 +61,7 @@ for name in sections:
     assert name in config, f"config file needs a {name} section"
 # trainer class configs, "loss" parameter uses default if not specified
 configs = {name: config.get(name) for name in (sections)}
+measure_power = True if args.measure_power == 1 else False
 
 def main(args):
     # -----------------------------------------------------------------------------
@@ -83,6 +86,8 @@ def main(args):
             print_rank0(f'Explicit casting to complexHalf and performing GEMM in spectral layer..')
     if compile:
         print_rank0(f'Using torch.compile in mode={compile_mode}')
+    if measure_power:
+        print_rank0('Measuring power usage during training using jpwr..')
 
     model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False,\
                                 benchmark=benchmark, use_amp=use_amp, use_complex_amp=use_complex_amp, \
@@ -101,7 +106,62 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     enable_tf32_only_on_a100()
+
     if args.compile_train == 1:
         mp.set_start_method("spawn", force=True)
         mp.freeze_support()
-    main(args)
+    
+    if measure_power:
+        from jpwr.ctxmgr import get_power
+        import platform
+        methods = set()
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                device_name = torch.cuda.get_device_name(i)
+                if "AMD" in device_name:
+                    methods.add("rocm")
+                if "NVIDIA" in device_name:
+                    methods.add("pynvml")
+                if "GH200" in device_name:
+                    methods.add("gh")
+        
+        power_methods = []
+        for m in methods:
+            if "rocm" == m:
+                from jpwr.gpu.rocm import power
+                power_methods.append(power())
+            if "pynvml" == m:
+                from jpwr.gpu.pynvml import power
+                power_methods.append(power())
+            if "gh" == m:
+                from jpwr.sys.gh import power
+                power_methods.append(power())
+        
+        with get_power(power_methods, 100) as measured_scope:  
+            main(args)
+        
+        energy_df, additional_data = measured_scope.energy()
+        nodename  = platform.node()
+        rankid    = int(os.getenv("RANK"))
+        
+        power_file = f"{args.trainDir}/{nodename}_rank{rankid}.csv"
+        measured_scope.df["nodename"] = nodename
+        measured_scope.df["rank"] = rankid
+        if not os.path.exists(power_file):
+            measured_scope.df.to_csv(power_file)
+        
+        energy_df["nodename"] = nodename
+        energy_df["rank"] = rankid
+        energy_file = power_file.replace(".csv", f"_energy.csv")
+        if not os.path.exists(energy_file):
+            energy_df.to_csv(energy_file)
+        
+        print(f"Host: {nodename}")
+        print(f"Energy-per-GPU-list integrated(Wh): \n{energy_df.to_string()}")
+        for k,v in additional_data.items():
+            additional_path = power_file.replace(".csv", f"{slugify(k)}.csv")
+            print(f"Writing {k} df to {additional_path}")
+            v.T.to_csv(additional_path)
+            print(f"Energy-per-GPU-list from {k}(Wh): {v.to_string()}")
+    else:
+        main(args)
