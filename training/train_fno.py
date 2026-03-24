@@ -70,9 +70,9 @@ class FourierNeuralOperator:
                     activities=activities,
                     schedule=tprof.schedule(skip_first=0, wait=0, warmup=1, active=2, repeat=1),
                     on_trace_ready=tprof.tensorboard_trace_handler(self.profiler_dir),
-                    record_shapes=True,
+                    record_shapes=False,
                     profile_memory=True,
-                    with_stack=True,
+                    with_stack=False,
                     with_flops=True,
                     with_modules=True
                 )
@@ -634,6 +634,7 @@ class FourierNeuralOperator:
             t0_epoch = time.perf_counter()
             # start profiling only from 3 iteration
             if i == 3 and self.enable_profile and self.profiler_type == "nsys":
+                print_rank0("NSYS Profiling Started...")
                 torch.cuda.cudart().cudaProfilerStart()
 
             t0_comp = time.perf_counter()
@@ -677,10 +678,12 @@ class FourierNeuralOperator:
                 monitor_time.append(t_monit)
 
             self.epochs += 1
+            if i == 5 and self.enable_profile and self.profiler_type == "nsys":
+                torch.cuda.cudart().cudaProfilerStop()
+                print_rank0("NSYS Profiling Ended...")
 
         print_rank0("Done Training!")
-        if self.enable_profile and self.profiler_type == "nsys":
-            torch.cuda.cudart().cudaProfilerStop()
+        
 
         if self.benchmark and len(epoch_time) > 0:
             num_epochs = len(epoch_time)
