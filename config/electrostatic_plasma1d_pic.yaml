@@ -70,6 +70,7 @@ train:
   checkpoint: None
   saveInterval: 50
   disableTensorboard: true
+  measure_power: 0             # measure power and energy using jpwr
 
 eval:
   runId: 1

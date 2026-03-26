@@ -4,7 +4,6 @@ import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-#from operator_learning.data.problems.rbc2D.dedalus_prop import OutputFiles
 from operator_learning.utils.misc import print_rank0
 
 class RBCDataset(Dataset):
@@ -315,6 +314,8 @@ class DomainDataset(RBCDataset):
 def createDatasetFromDedalus(
         dataDir, inSize, outStep, inStep, outType, outScaling, dataFile,
         verbose=False, nDim=2, **kwargs):
+    from operator_learning.data.problems.rbc2D.dedalus_prop import OutputFiles
+    
     assert inSize == 1, "inSize != 1 not implemented yet ..."
     assert nDim == 2, "nDim != 2 not implemented yet ..."
     simDirsSorted = sorted(glob.glob(f"{dataDir}/simu_*"), key=lambda f: int(f.split('simu_',1)[1]))

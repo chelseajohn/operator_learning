@@ -1,34 +1,34 @@
 simu:
-  picFile: Datasets_2D_electrostatic_plasma/2D_PIF_5_miniapps_500k.h5
-  nDim: 2
+  picFile: Datasets_3D_electrostatic_plasma/3D_PIF_sl_penning_100k.h5
+  nDim: 3
 
 sample:
-  iEnd: 600
+  iEnd: 601
   step: 1
 
 data:
   dataClass: pic
   outType: solution
   outScaling: 1
-  space_dim: 2
+  space_dim: 3
   xStep: 1
   yStep: 1
   zStep: 1
   seed: null
-  dataFile: Datasets_2D_electrostatic_plasma/PIF2D_5_miniapps_500k_QL_normalize.h5
+  dataFile: Datasets_3D_electrostatic_plasma/PIF3D_sl_penning_100k_QL_normalize.h5
   trainRatio: 0.8
-  batchSize:  12        # Global Batch size 
+  batchSize:  12       # Global Batch size 
   sampling_mode: None  # [fixed, ordered, random]
  
 
 model:
-  da: 2
-  du: 2
+  da: 3
+  du: 3
   dv: 32
   kX: 16
   kY: 16
-  kZ: None
-  n_dims: 2
+  kZ: 16
+  n_dims: 3
   n_layers: 4
   bias: false
   non_linearity: gelu
@@ -38,9 +38,9 @@ model:
   use_skip_connection: false
   skip_type: soft-gating
   use_dse: true                        # Direct Spectral Evaluation
-  use_kb: false                          # Kaiser-Bessel NUFFT
-  use_toeplitz: false                   # Toeplitz NUFFT
-  matrix_free: false
+  use_kb: false                        # Kaiser-Bessel NUFFT
+  use_toeplitz: false                  # Toeplitz NUFFT
+  matrix_free: true
 
 optim:
   name: adam
@@ -59,13 +59,13 @@ loss:
   # absolute: false
   
 parallel_strategy:
-  ddp: true      # Distributed Data Parallel
-  tp : true      # Tensor Parallel(Only for PIC-DSE)
-  tp_size: 2     # must be divisible by nParticle          
+  ddp: true        # Distributed Data Parallel
+  tp : false       # Tensor Parallel(Only for PIC-DSE)
+  tp_size: 1       # must be divisible by nParticle          
   gpus_per_node: 4
 
 train:
-  trainDir: PIF2D_5_miniapps_QL_normalize
+  trainDir: PIF3D_sl_penning_QL_normalize
   epochs: 250                     # nEpochs
   checkpoint: None  
   saveInterval: 50
@@ -75,7 +75,7 @@ train:
 eval:
   runId: 1
   imgExt: png
-  evalDir: eval2D_PIF_5_miniapps
+  evalDir: eval3D_PIF_5_miniapps
   dim: 2
   kc : 0.21
   NG : 32

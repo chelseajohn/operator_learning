@@ -44,7 +44,7 @@ parallel_strategy:
 
 ## Particle Parallel Training For PIC (TP)
 
-For PIC problem, the data can be parallelised along particle dimension (tensor parallel) in addition to time step dimension which is parallelised with DDP as `(timestep/dp_ranks, channels, nparticle/tp_ranks)` 
+For PIC problem, the data can be parallelised along particle dimension (tensor parallel/ input sharding) in addition to time step dimension which is parallelised with DDP as `(timestep/dp_ranks, channels, nparticle/tp_ranks)` 
 
 ### 🔧 Enable DDP + TP in Configuration
 Edit your `config.yaml` to include:
@@ -106,4 +106,4 @@ profile:
 ## Problems Solved
 
 - **Rayleigh-Bénard convection** in 2D/3D using FNO, with datasets generated via the pseudo-spectral solver [Dedalus](https://dedalus-project.readthedocs.io/en/latest/) for 2D and [pySDC](https://zenodo.org/records/15196003) for 3D.
-- **Particle-In-Cell** (1D/2D) algorithm using FNO for electric field prediction
+- **Particle-In-Cell** (1D/2D/3D) algorithm using FNO for electric field prediction
