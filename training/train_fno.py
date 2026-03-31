@@ -357,19 +357,16 @@ class FourierNeuralOperator:
                 if self.enable_profile:
                     nvtx.range_push("loss")
                 loss = self.lossFunction(pred, ref)
+                if self.TP_enabled:
+                    local_loss = loss.detach()
+                    if iBatch < 2:
+                        print_rank0(f"Train Batch {iBatch} in {self.epochs} has tp_loss: {local_loss}\n")
+                    dist.all_reduce(loss, op=dist.ReduceOp.AVG, group=self.tp_mesh.get_group()) # over all particles
                 if self.enable_profile:
                     nvtx.range_pop() # end loss
 
-            if self.TP_enabled:
-                # All-reduce for logging (detached, outside graph)
-                tensor_loss = loss.detach().clone()
-                dist.all_reduce(tensor_loss, op=dist.ReduceOp.AVG, group=self.tp_mesh.get_group())
-                total_loss += tensor_loss
-                # if iBatch % 10 == 0:
-                #     print_rank0(f"Train Epoch {self.epochs}: tp_loss: {tensor_loss}\n")
-            else:
-                total_loss += loss.detach()    
-                        
+            
+            total_loss += loss.detach()                
             optimizer.zero_grad()
 
             if self.benchmark and iBatch % 10 == 0:
@@ -385,13 +382,7 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 nvtx.range_pop()  # end backward
 
-            # if self.TP_enabled:
-            #     # allreduce tp gradients
-            #     for param in model.parameters():
-            #         if param.grad is not None:
-            #             dist.all_reduce(param.grad, group=self.tp_mesh.get_group())
-            #             param.grad /= self.tp_size
-    
+
             if self.debug:
                 any_grad_nonzero = False
                 for name, p in self.model.named_parameters():
@@ -549,16 +540,16 @@ class FourierNeuralOperator:
                     loss_tensor = local_loss.detach().clone()
                     dist.all_reduce(loss_tensor, 
                                     op=dist.ReduceOp.AVG,
-                                    group=self.tp_mesh.get_group())
+                                    group=self.tp_mesh.get_group()) # over all particles
                     total_loss += loss_tensor
 
                     error_tensor = error.detach().clone()
                     dist.all_reduce(error_tensor,
                                     op=dist.ReduceOp.AVG,
-                                    group=self.tp_mesh.get_group())
+                                    group=self.tp_mesh.get_group())  # over all particles
                     relative_error += error_tensor
-                     # if iBatch % 10 == 0:
-                     #      print_rank0(f"Train Epoch {self.epochs}: tp_loss: {loss_tensor} tp_error: {error_tensor}\n")
+                    if iBatch < 2:
+                        print_rank0(f"Val Batch {iBatch} in Epoch {self.epochs} has tp_loss: {loss_tensor} tp_error: {error_tensor}\n")
                 else:
                     total_loss += local_loss.detach()
                     relative_error += error.detach()
