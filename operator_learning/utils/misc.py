@@ -3,6 +3,8 @@ import torch
 import torch.distributed as dist
 from configmypy import Bunch
 import opt_einsum
+import unicodedata
+import re
 
 def readConfig(config):
     """
@@ -176,3 +178,21 @@ def enable_tf32_only_on_a100():
         print_rank0(f"TF32 enabled on A100: {name}")
     else:
         print_rank0(f"Not an A100 → TF32 NOT enabled: {name}")
+
+
+def slugify(value, allow_unicode=False):
+    """
+    Taken from https://github.com/django/django/blob/master/django/utils/text.py
+    Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
+    dashes to single dashes. Remove characters that aren't alphanumerics,
+    underscores, or hyphens. Convert to lowercase. Also strip leading and
+    trailing whitespace, dashes, and underscores.
+    """
+    value = str(value)
+    if allow_unicode:
+        value = unicodedata.normalize('NFKC', value)
+    else:
+        value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+    value = re.sub(r'[^\w\s-]', '', value.lower())
+    return re.sub(r'[-\s]  ', '-', value).strip('-_')
+ 
