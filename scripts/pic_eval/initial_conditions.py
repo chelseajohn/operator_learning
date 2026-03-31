@@ -217,8 +217,10 @@ def inv_trans_sampling_gpu(alpha, k, L, N, dim=1,
             X[dim-1] = Xnew
 
         VP = cp.zeros([dim, N])
-        if(dim == 2):
+        if(dim > 1):
             VP[0] = cp.random.randn(1, N)
+        if(dim > 2):
+            VP[1] = cp.random.randn(1, N)
         if(label == 'tsi'):
             Nhalf = int(N/2)
             VP[dim-1,:Nhalf] = -cp.pi/2.0 + 0.1 * cp.random.randn(Nhalf)
@@ -231,6 +233,7 @@ def inv_trans_sampling_gpu(alpha, k, L, N, dim=1,
             VP[dim-1,ninetypercent:] =  4.0 + sigma * cp.random.randn(rem)
 
     elif(label == 'cyclotron'):
+        assert dim == 2, 'Cyclotron test case only for 2D' 
         sigmas = cp.array([Larr[0]/10,Larr[1]/30]) / cp.sqrt(2) # Control the shape of the beam
         X = cp.random.randn(dim, N) * sigmas
         if(ref == 'pic'):
@@ -238,10 +241,9 @@ def inv_trans_sampling_gpu(alpha, k, L, N, dim=1,
             X = cp.mod(X, Larr)
 
         VP = cp.random.randn(dim, N)
-
-    if(label == 'cyclotron'):
         XP = X
-    else:
+
+    if(label != 'cyclotron'):
         # periodic wrap to [0,L)
         XP = cp.mod(X, Larr)
 

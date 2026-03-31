@@ -8,14 +8,26 @@ def specKernel(NG, L, dx, dim, order=2):
     Kb = Ka[::-1]
     K = cp.append(cp.append(Ka, [- NG // 2]), - Kb)
     K = ((2 * cp.pi) / L[0]) * K
-    SHat0 = (cp.sin(K * dx[0] / 2) / (K * dx[0] / 2)) ** order
-    SHat0 = cp.append([1], SHat0).reshape(NG, 1)
     if(dim == 1):
-        return SHat0.reshape(1, NG)
-    else:
+        SHat0 = (cp.sin(K * dx[0] / 2) / (K * dx[0] / 2)) ** order
+        SHat0 = cp.append([1], SHat0)
+        return SHat0[None, :]
+    elif(dim == 2):
+        SHat0 = (cp.sin(K * dx[0] / 2) / (K * dx[0] / 2)) ** order
+        SHat0 = cp.append([1], SHat0)
         SHat1 = (cp.sin(K * dx[1] / 2) / (K * dx[1] / 2)) ** order
         SHat1 = cp.append([1], SHat1)
-        return cp.kron(SHat0, SHat1)
+        #return cp.kron(SHat0, SHat1)
+        return SHat0[:, None] * SHat1[None, :]
+    else:
+        SHat0 = (cp.sin(K * dx[0] / 2) / (K * dx[0] / 2)) ** order
+        SHat0 = cp.append([1], SHat0)
+        SHat1 = (cp.sin(K * dx[1] / 2) / (K * dx[1] / 2)) ** order
+        SHat1 = cp.append([1], SHat1)
+        SHat2 = (cp.sin(K * dx[2] / 2) / (K * dx[2] / 2)) ** order
+        SHat2 = cp.append([1], SHat2)
+        #breakpoint()
+        return SHat0[:, None, None] * SHat1[None, :, None] * SHat2[None, None, :]
 
     
 def circleKernel(NG, L, order=2):

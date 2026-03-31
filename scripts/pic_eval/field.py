@@ -43,7 +43,7 @@ def fieldInFourier(rhoHat, L, dim, testCase, ref, J, T1, Q=None, T2=None):
         #phiHat = cp.concatenate([[0], rho_modes * (L / (2 * cp.pi * K)) ** 2])
         #EHat   = cp.concatenate([[0], rho_modes * (L / (2j * cp.pi * K))])
         #EHat[N // 2] = 0
-    else:
+    elif(dim == 2):
         if(testCase == 'cyclotron'):
             if(ref == 'pif'):
                 phiHat = Q * T1 * rhoHat # /phi in Fourier space
@@ -81,6 +81,65 @@ def fieldInFourier(rhoHat, L, dim, testCase, ref, J, T1, Q=None, T2=None):
             E1[rhoHat.shape[0]//2, :] = 0
             E1[:, rhoHat.shape[1]//2] = 0
             EHat = cp.array([E0, E1])
+    else:
+        # build kx
+        Ja = cp.arange(rhoHat.shape[0] // 2)
+        Jb = Ja[:0:-1]
+        J = cp.append(cp.append(Ja, [-rhoHat.shape[0] // 2]), -Jb)
+        
+        # build ky
+        Ka = cp.arange(rhoHat.shape[1] // 2)
+        Kb = Ka[:0:-1]
+        K = cp.append(cp.append(Ka, [-rhoHat.shape[1] // 2]), -Kb)
+        
+        # build kz
+        La = cp.arange(rhoHat.shape[2] // 2)
+        Lb = La[:0:-1]
+        Lk = cp.append(cp.append(La, [-rhoHat.shape[2] // 2]), -Lb)
+        
+        # scale to physical wavenumbers
+        J = J * (2 * cp.pi / L[0])
+        K = K * (2 * cp.pi / L[1])
+        Lk = Lk * (2 * cp.pi / L[2])
+        
+        # expand to 3D grids
+        J = J[:, None, None]
+        K = K[None, :, None]
+        Lk = Lk[None, None, :]
+        
+        # Laplacian in Fourier space
+        absolute = J**2 + K**2 + Lk**2
+        absolute[0, 0, 0] = 1  # avoid divide by zero
+        
+        # solve Poisson
+        phiHat = rhoHat / absolute
+        phiHat[0, 0, 0] = 0  # enforce neutrality
+        
+        # electric field (E = -grad phi)
+        E0 = -1j * J * phiHat
+        E1 = -1j * K * phiHat
+        E2 = -1j * Lk * phiHat
+        
+        # --- Nyquist cleanup (VERY important in 3D) ---
+        nx, ny, nz = rhoHat.shape
+        
+        phiHat[nx//2, :, :] = 0
+        phiHat[:, ny//2, :] = 0
+        phiHat[:, :, nz//2] = 0
+        
+        E0[nx//2, :, :] = 0
+        E0[:, ny//2, :] = 0
+        E0[:, :, nz//2] = 0
+        
+        E1[nx//2, :, :] = 0
+        E1[:, ny//2, :] = 0
+        E1[:, :, nz//2] = 0
+        
+        E2[nx//2, :, :] = 0
+        E2[:, ny//2, :] = 0
+        E2[:, :, nz//2] = 0
+        
+        EHat = cp.array([E0, E1, E2])
 
     return phiHat, EHat
 

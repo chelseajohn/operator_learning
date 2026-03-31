@@ -133,7 +133,7 @@ def scatterFourier(XP, SHat, NG, N, Q, L, dim, testCase, wp=1):
                 isign=-1,
                 modeord=1)) / L[0]
 
-    else:
+    elif(dim == 2):
         if(testCase == 'cyclotron'):
             # Note this is not exactly rhoHat as it is not multiplied 
             # by Q and SHat but this is what is needed in the free space
@@ -164,6 +164,16 @@ def scatterFourier(XP, SHat, NG, N, Q, L, dim, testCase, wp=1):
                     eps=1e-12,
                     isign=-1,
                     modeord=1)) / (L[0] * L[1])
+    else:
+        rhoHat = Q * SHat * (cufinufft.nufft3d1(
+                XP[0] * 2 * cp.pi / L[0],
+                XP[1] * 2 * cp.pi / L[1],
+                XP[2] * 2 * cp.pi / L[2],
+                0j + cp.zeros(N) + wp,
+                n_modes=(NG,NG,NG),
+                eps=1e-12,
+                isign=-1,
+                modeord=1)) / (L[0] * L[1] * L[2])
 
     return rhoHat
 
@@ -173,8 +183,9 @@ def gatherFourier(XP, EHat, SHat, QM, L, dim, testCase, wp=1):
         coeff1 = EHat * SHat
         Ep = cp.real(cufinufft.nufft1d2(XP[0] * 2 * cp.pi / L[0], coeff1, eps=1e-12, isign=1, modeord=1))
         a = (QM / wp) * Ep
-    else:
+    elif(dim == 2):
         if(testCase == 'cyclotron'):
+            assert dim == 2, 'Cyclotron test case only for 2D' 
             Exp = cp.real(cufinufft.nufft2d2(XP[0] * cp.pi / L[0] + cp.pi, XP[1] * cp.pi / L[1] + cp.pi, EHat[0], eps=1e-12, isign=1, modeord=1))
             Eyp = cp.real(cufinufft.nufft2d2(XP[0] * cp.pi / L[0] + cp.pi, XP[1] * cp.pi / L[1] + cp.pi, EHat[1], eps=1e-12, isign=1, modeord=1))
             a1 = (QM / wp) * Exp
@@ -191,6 +202,18 @@ def gatherFourier(XP, EHat, SHat, QM, L, dim, testCase, wp=1):
             a2 = (QM / wp) * Eyp
             Ep = cp.stack([Exp, Eyp], axis=0)
             a = cp.stack([a1, a2], axis=0)
+    else:
+        coeff1 = EHat[0] * SHat
+        Exp = cp.real(cufinufft.nufft3d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], XP[2] * 2 * cp.pi / L[2], coeff1, eps=1e-12, isign=1, modeord=1))
+        coeff2 = EHat[1] * SHat
+        Eyp = cp.real(cufinufft.nufft3d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], XP[2] * 2 * cp.pi / L[2], coeff2, eps=1e-12, isign=1, modeord=1))
+        coeff3 = EHat[2] * SHat
+        Ezp = cp.real(cufinufft.nufft3d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], XP[2] * 2 * cp.pi / L[2], coeff3, eps=1e-12, isign=1, modeord=1))
+        a1 = (QM / wp) * Exp
+        a2 = (QM / wp) * Eyp
+        a3 = (QM / wp) * Ezp
+        Ep = cp.stack([Exp, Eyp, Ezp], axis=0)
+        a = cp.stack([a1, a2, a3], axis=0)
         
 
     return Ep, a

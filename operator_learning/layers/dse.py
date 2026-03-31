@@ -106,7 +106,7 @@ class SpectralConv_dse(nn.Module):
      
         # Return to physical space
         x  = transform.inverse(out_ft)   # [batchsize, dv, nParticle]
-        x = x / x.size(-1) * self.dim 
+        x = (x / (x.size(-1) * self.tp_size)) * self.dim 
 
         if self.bias is not None:
             x = x + self.bias

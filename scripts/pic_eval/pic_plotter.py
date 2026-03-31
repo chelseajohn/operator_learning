@@ -39,30 +39,36 @@ class PICVisualizer:
         self.ref = args.ref
         if self.dim == 1:
             self.k = np.array([args.kc])
-        else:
+        elif self.dim == 2:
             self.k = np.array([args.kc, args.kc])
+        else:
+            self.k = np.array([args.kc, args.kc, args.kc])
         self.testCase = args.testCase
         if(self.testCase == 'cyclotron'):
             self.L = np.array([1, 1])
             self.B0 = cp.array([0,0,300]) # Constant external magnetic field
         else:
             self.L = 2*np.pi/self.k # Length of the container  
+            self.B0 = None
 
         self.dx = np.array(self.L / self.NG) # cell length 
         self.Ln = cp.asarray(self.L)
         self.dxn = cp.asarray(self.dx)
+        self.kn = cp.asarray(self.k)
         self.alpha = args.alpha
         
         if self.dim == 1:                                                             
             self.Q = self.L[0]/ (self.QM * self.N)                                 # Charge of a particle                                                    
             self.rho_back = - self.Q * self.N / self.L[0]                          # background rho     
-        else:
+        elif self.dim == 2:
             self.Q = self.L[0] * self.L[1] / (self.QM * self.N)  
             self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1])
+        else:
+            self.Q = self.L[0] * self.L[1] * self.L[2] / (self.QM * self.N)  
+            self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1] * self.L[2])
        
 
-        #self.xp0,self.vp0 = InvTransSampling(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim, label=self.testCase)
-        self.xp0,self.vp0 = inv_trans_sampling_gpu(alpha=self.alpha, k=self.k, L=self.L, N=self.N, dim=self.dim, label=self.testCase, ref=self.ref)
+        self.xp0,self.vp0 = inv_trans_sampling_gpu(alpha=self.alpha, k=self.kn, L=self.Ln, N=self.N, dim=self.dim, label=self.testCase, ref=self.ref)
         print(f"Initial conditions done")
         # Set matplotlib defaults (better figures)
         plt.rcParams.update({
@@ -83,7 +89,7 @@ class PICVisualizer:
 
     def picND(self, ml_acc: bool = False, model = None, data_file = None):
         """
-        Run a 1D/2D Particle-In-Cell (PIC) simulation.
+        Run a 1D/2D/3D Particle-In-Cell (PIC), Particle-In-Fourier (PIF) or Particle-In-Neural Operator (PINOP) simulation.
 
         Args:
             ml_acc (bool, optional): If True, use machine-learning-based acceleration
@@ -122,8 +128,13 @@ class PICVisualizer:
 
         if(self.dim == 1):
             Eyp = None
+            Ezp = None
+        elif(self.dim == 2):
+            Eyp = []
+            Ezp = None
         else:
             Eyp = []
+            Ezp = []
 
         # Time tracking
         times_acc = []
@@ -136,6 +147,10 @@ class PICVisualizer:
                 SHat, J, T1, T2 = freeSpaceKernelsPIF(NG=self.NG, L=self.Ln)
             else:
                 J, T1 = freeSpaceKernelsPIC(NG=self.NG, L=self.Ln)
+        else:
+            J = None
+            T1 = None
+            T2 = None
 
 
         for it in range(self.NT):
@@ -151,8 +166,10 @@ class PICVisualizer:
                 inputs = xp[None, :, :].copy() # [batch=1, channel=dim, particles]
                 inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
                 
-                if(self.dim == 2):
+                if(self.dim > 1):
                     inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
+                if(self.dim > 2):
+                    inputs[:, 2, :] = normalize_per_sample(inputs[:, 2, :])
             
                 prediction = model(inputs) # [1, channel=dim, particles]
                 Efieldparticle = prediction.squeeze()
@@ -162,7 +179,7 @@ class PICVisualizer:
                     Efieldparticle = Efieldparticle * ((self.Q * self.N))
                     #Subtract volume average of electric field for periodic compatibility 
                     Efieldparticle = Efieldparticle - ((1/self.N) * cp.sum(Efieldparticle))
-                else:
+                elif(self.dim == 2):
                     Efieldparticle[0] = Efieldparticle[0] * data_output_std[0] + data_output_mean[0]
                     Efieldparticle[1] = Efieldparticle[1] * data_output_std[1] + data_output_mean[1]
                     #Scale by normalization factor \alpha = Q_tot / sqrt(L_x * L_y) in 2D for the current problem
@@ -171,6 +188,16 @@ class PICVisualizer:
                         #Subtract volume average of electric field for periodic compatibility 
                         Efieldparticle[0] = Efieldparticle[0] - ((1/self.N) * cp.sum(Efieldparticle[0]))
                         Efieldparticle[1] = Efieldparticle[1] - ((1/self.N) * cp.sum(Efieldparticle[1]))
+                else:
+                    Efieldparticle[0] = Efieldparticle[0] * data_output_std[0] + data_output_mean[0]
+                    Efieldparticle[1] = Efieldparticle[1] * data_output_std[1] + data_output_mean[1]
+                    Efieldparticle[2] = Efieldparticle[2] * data_output_std[2] + data_output_mean[2]
+                    #Scale by normalization factor \alpha = Q_tot / (L_x * L_y * L_z)^(2/3) in 3D for the current problem
+                    Efieldparticle[:,:] = Efieldparticle[:,:] * ((self.Q * self.N)/((self.Ln[0] * self.Ln[1] * self.Ln[2])**(2/3)))
+                    #Subtract volume average of electric field for periodic compatibility 
+                    Efieldparticle[0] = Efieldparticle[0] - ((1/self.N) * cp.sum(Efieldparticle[0]))
+                    Efieldparticle[1] = Efieldparticle[1] - ((1/self.N) * cp.sum(Efieldparticle[1]))
+                    Efieldparticle[2] = Efieldparticle[2] - ((1/self.N) * cp.sum(Efieldparticle[2]))
                 
                 a = accelerateML(E=Efieldparticle, wp=wp, QM=self.QM)
                 times_acc.append(time.time() - t0)
@@ -215,7 +242,7 @@ class PICVisualizer:
                 Egpx = cp.sum(Efieldparticle[:] ** 2) * self.Ln[0] / self.N
                 # Compute potential energy
                 Epotential = 0.5 * Egpx
-            else:
+            elif(self.dim == 2):
                 if(self.testCase != 'cyclotron'):
                     momx = cp.sum(self.Q * vp[0] / self.QM)
                     momy = cp.sum(self.Q * vp[1] / self.QM)
@@ -225,6 +252,17 @@ class PICVisualizer:
                 Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
                 # Compute potential energy
                 Epotential = 0.5 * (Egpx + Egpy)
+            else:
+                momx = cp.sum(self.Q * vp[0] / self.QM)
+                momy = cp.sum(self.Q * vp[1] / self.QM)
+                momz = cp.sum(self.Q * vp[2] / self.QM)
+                mom = cp.sqrt(momx**2 + momy**2 + momz**2)
+                # Electric field energy
+                Egpx = cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N
+                Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N
+                Egpz = cp.sum(Efieldparticle[2,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N
+                # Compute potential energy
+                Epotential = 0.5 * (Egpx + Egpy + Egpz)
 
 
             
@@ -233,8 +271,10 @@ class PICVisualizer:
             Ep.append(Epotential.get())
             E.append((kinetic + Epotential).get())
             Exp.append(Egpx.get())
-            if(self.dim == 2):
+            if(self.dim > 1):
                 Eyp.append(Egpy.get())
+            if(self.dim > 2):
+                Ezp.append(Egpz.get())
             if(self.testCase != 'cyclotron'):
                 momentum.append(mom.get())
             else:
@@ -243,7 +283,7 @@ class PICVisualizer:
         time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
 
-        return xp, vp, wp, E, Ek, Ep, momentum, Exp, Eyp, time_acc_mean
+        return xp, vp, wp, E, Ek, Ep, momentum, Exp, Eyp, Ezp, time_acc_mean
 
     # ---------------------------
     # Plotting methods
@@ -340,7 +380,7 @@ class PICVisualizer:
         plt.clf()
         return filename
 
-    def landau_decay(self, Ex=None, ExPred=None, Ey=None, EyPred=None, label='weakLandau'):
+    def landau_decay(self, Ex=None, ExPred=None, Ey=None, EyPred=None, Ez=None, EzPred=None, label='weakLandau'):
         a = np.linspace(0, (self.NT - 1) * self.DT, self.NT)
         #pp = period(self.k[0])
         #b = phiMax[int(pp // (2 * self.DT))] * np.exp((a[0:2000] - pp / 2) * decayRate(self.k[0]))
@@ -350,6 +390,8 @@ class PICVisualizer:
             plt.plot(a, Ex, label=r'$\int ERef_x^2 dV$', color='blue')
         if Ey is not None:
             plt.plot(a, Ey, label=r'$\int ERef_y^2 dV$', color='orange')
+        if Ez is not None:
+            plt.plot(a, Ez, label=r'$\int ERef_z^2 dV$', color='black')
         #plt.plot(a[0:2000], b, label='Predicted Decay Rate', color='green', linestyle="--")
         if(label == 'weakLandau'):
             gamma1 = -0.3066
@@ -369,12 +411,18 @@ class PICVisualizer:
             plt.plot(a, theo_ref2, label='Predicted Growth Rate', color='red')
         if ExPred is not None:
             plt.plot(a, ExPred, label=r'$\int EPred_x^2 dV$', color='blue', linestyle="--")
-        
         if EyPred is not None:
             plt.plot(a, EyPred, label=r'$\int EPred_y^2 dV$', color='orange', linestyle="--")
+        if EzPred is not None:
+            plt.plot(a, EzPred, label=r'$\int EPred_z^2 dV$', color='black', linestyle="--")
         plt.title(f'Landau Damping Decay Rate (k={self.k})')
         plt.yscale('log')
-        plt.ylabel(r'$\int E_x^2 dV$, $\int E_y^2 dV$')
+        if EzPred is not None:
+            plt.ylabel(r'$\int E_x^2 dV$, $\int E_y^2 dV$, $\int E_z^2 dV$')
+        elif EyPred is not None:
+            plt.ylabel(r'$\int E_x^2 dV$, $\int E_y^2 dV$')
+        else:
+            plt.ylabel(r'$\int E_x^2 dV$')
         plt.xlabel(r'$\omega_p t$')
         plt.legend()
         plt.grid(True)
@@ -383,11 +431,16 @@ class PICVisualizer:
                 plt.ylim(1e-5,10)
             if(label == 'weakLandau'):
                 plt.ylim(1e-5,1e-1)
-        else:
+        elif(self.dim == 2):
             if(label == 'strongLandau'):
                 plt.ylim(1e-3,1e2)
             if(label == 'weakLandau'):
                 plt.ylim(1e-3,1)
+        else:
+            if(label == 'strongLandau'):
+                plt.ylim(1e-3,1e4)
+            if(label == 'weakLandau'):
+                plt.ylim(1e-3,20)
         plt.tight_layout()
         plt.savefig(f"{self.eval_dir}/{filename}", dpi=200)
         plt.clf()
@@ -520,7 +573,7 @@ class PICVisualizer:
         plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)
         plt.close()
   
-    def instability(self, Ex = None, ExPred = None, Ey = None, EyPred = None, label='tsi'):
+    def instability(self, Ex = None, ExPred = None, Ey = None, EyPred = None, Ez = None, EzPred = None, label='tsi'):
         a = np.linspace(0, (self.NT - 1) * self.DT, self.NT)
         plt.figure()
         filename = self._img_path("growth_rate")
@@ -528,21 +581,29 @@ class PICVisualizer:
             plt.plot(a, Ex, label=r'$\int ERef_x^2 dV$', color='blue')
         if Ey is not None:
             plt.plot(a, Ey, label=r'$\int ERef_y^2 dV$', color='orange')
+        if Ez is not None:
+            plt.plot(a, Ez, label=r'$\int ERef_z^2 dV$', color='black')
         if(label == 'tsi'):
             gamma = 0.4952
         else:
             gamma = 0.356
         ind = np.argmin(np.abs(a - 8.0))
         theo_ref = np.exp(gamma * a)
-        if Ey is not None:
-            theo_ref = (Ey[ind]/theo_ref[ind])*theo_ref
+        if EzPred is not None:
+            theo_ref = (EzPred[ind]/theo_ref[ind])*theo_ref
         else:
-            theo_ref = (EyPred[ind]/theo_ref[ind])*theo_ref
+            if EyPred is not None:
+                theo_ref = (EyPred[ind]/theo_ref[ind])*theo_ref
+            else:
+                theo_ref = (ExPred[ind]/theo_ref[ind])*theo_ref
+
         plt.plot(a, theo_ref, label='predicted growth rate', color='seagreen')
         if ExPred is not None:
             plt.plot(a, ExPred, label=r'$\int EPred_x^2 dV$', color='blue', linestyle="--")
         if EyPred is not None:
             plt.plot(a, EyPred, label=r'$\int EPred_y^2 dV$', color='orange', linestyle="--")
+        if EzPred is not None:
+            plt.plot(a, EzPred, label=r'$\int EPred_z^2 dV$', color='black', linestyle="--")
         plt.yscale('log')
         ax = plt.gca()
         if(self.dim == 1):
@@ -550,15 +611,26 @@ class PICVisualizer:
                 ax.set_ylim([1e-4,1e2])
             else:
                 ax.set_ylim([1e-4,1e1])
-        else:
+        elif(self.dim == 2):
             if(label == 'tsi'):
                 ax.set_ylim([1e-4,1e3])
             else:
                 ax.set_ylim([1e-2,1e3])
-        plt.ylabel(r'$\int E_x^2 dV$, $\int E_y^2 dV$')
+        else:
+            if(label == 'tsi'):
+                ax.set_ylim([1e-4,1e4])
+            else:
+                ax.set_ylim([1e-2,1e4])
+        if EzPred is not None:
+            plt.ylabel(r'$\int E_x^2 dV$, $\int E_y^2 dV$, $\int E_z^2 dV$')
+        elif EyPred is not None:
+            plt.ylabel(r'$\int E_x^2 dV$, $\int E_y^2 dV$')
+        else:
+            plt.ylabel(r'$\int E_x^2 dV$')
         plt.xlabel(r'normalized time unit: $\omega_p$t', fontsize='14')
         plt.legend()
         plt.grid(color='gray')
+        plt.tight_layout()
         plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)
         plt.clf()
         return filename
