@@ -10,7 +10,6 @@ from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer, NUFFTLayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
 from operator_learning.data.transforms.vandermonde_matrix_free import VandermondeTransformMatrixFree
-#from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
 
 class FNOLayer(nn.Module):
 
@@ -149,6 +148,7 @@ class FNO(nn.Module):
                          )
                  for _ in range(n_layers)])
         # elif use_toeplitz:
+        #     from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
         #     self.layers = nn.ModuleList(
         #         [NUFFTLayer(dv=dv, 
         #                   kX=kX, dataClass=dataClass,
@@ -158,6 +158,7 @@ class FNO(nn.Module):
         #                   use_complex_amp=use_complex_amp)
         #          for _ in range(n_layers)])
         elif use_kb:
+            from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
             self.layers = nn.ModuleList(
                 [NUFFTLayer(dv=dv,
                           kX=kX, dataClass=dataClass,
