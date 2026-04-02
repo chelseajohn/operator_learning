@@ -4,13 +4,14 @@ if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
     from operator_learning.utils import flop_wrappers
 import torch
 import torch.nn as nn
+from operator_learning.utils.communication import get_world_size, get_rank
 from operator_learning.utils.misc import format_complexTensor, deformat_complexTensor, einsum_complexhalf
 from .linear import GridLinear
 from .mlp import MLP
 
 class SpectralConv_dse(nn.Module):
     def __init__(self, dv, kX, kY=None, kZ=None, dataClass='pic', bias=False, 
-                 dim=1, use_complex_amp=False, device_mesh=None):
+                 dim=1, use_complex_amp=False, tp_mesh=None):
         super().__init__()
         assert dim in (1,2, 3), "implemented only for PIC1D, PIC2D and PIC3D"
         self.dim = dim
@@ -20,15 +21,12 @@ class SpectralConv_dse(nn.Module):
         self.channel = dv
         self.use_complex_amp = use_complex_amp
         self.scale = 1 / (dv * dv)
-        self.device_mesh = device_mesh
-        if device_mesh is not None and "tp" in device_mesh.mesh_dim_names:
-            self.TP_enabled = True
-            self.tp_size = device_mesh["tp"].size()
+        self.tp_mesh = tp_mesh
+        if self.tp_mesh is not None:
+            self.tp_size = self.tp_mesh.size()
         else:
-            self.TP_enabled = False
             self.tp_size = 1
       
-
         if dim == 1:
             weights = self.scale * torch.rand(dv, dv, 2*self.kX, dtype=torch.cfloat)
             self.R = nn.Parameter(format_complexTensor(weights))
@@ -90,9 +88,9 @@ class SpectralConv_dse(nn.Module):
         # Fourier coeffs (complex)
         x_ft = transform.forward(x.to(dtype))  # [batchsize, dv, modes]
        
-        if self.TP_enabled:
-            torch.distributed.all_reduce(x_ft, group=self.device_mesh.get_group())
-    
+        if self.tp_size > 1:
+            torch.distributed.all_reduce(x_ft, group=self.tp_mesh.get_group())
+            
         if self.dim == 1:
             out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, kX]
         elif self.dim == 2:
@@ -122,7 +120,7 @@ class DSELayer(nn.Module):
                  bias=False,
                  dim=1,
                  use_complex_amp=False,
-                 device_mesh=None,
+                 tp_mesh=None,
                  ):
         super().__init__()
 
@@ -132,8 +130,8 @@ class DSELayer(nn.Module):
         else:
             self.sigma = nn.ReLU(inplace=True)
         
-        self.device_mesh = device_mesh
-        self.conv = SpectralConv_dse(dv, kX, kY, kZ, dataClass, bias, dim, use_complex_amp, device_mesh)
+        self.tp_mesh = tp_mesh
+        self.conv = SpectralConv_dse(dv, kX, kY, kZ, dataClass, bias, dim, use_complex_amp, tp_mesh)
     
         # self.W = GridLinear(
         #                inSize=dv, outSize=dv, hiddenSize=None,

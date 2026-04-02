@@ -17,7 +17,8 @@ data:
   seed: null
   dataFile: Datasets_1D_electrostatic_plasma/PIF1D_4_miniapps_QL_normalize.h5
   trainRatio: 0.8
-  batchSize: 20        # Global Batch size
+  batchSize: 20        # Train Global Batch size
+  val_batchSize: 1     # validation local Batch size 
   sampling_mode: None  # [fixed, ordered, random]
  
 model:

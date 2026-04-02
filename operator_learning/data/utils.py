@@ -55,7 +55,7 @@ def getDataLoaders(dataFile,
                    use_minLimit=False,
                    padding=[0,0,0,0], 
                    add_fullGrid=False, # to include full grid with domain grids
-                   dp_mesh=None,
+                   dp_size=1,tp_size=1,
                    **kwargs):
 
     if sampling_mode is not None:
@@ -82,6 +82,7 @@ def getDataLoaders(dataFile,
     if kwargs.get('datasetOnly', False):
         return dataset
 
+    val_batchSize = kwargs.get('val_batchSize', None)  # local batch size
     dataset.printInfos()
     
     if (sampling_mode == 'random' and not pad_to_fullGrid) or \
@@ -108,13 +109,8 @@ def getDataLoaders(dataFile,
             dataset, [trainSize, valSize], generator=generator)
 
     if torch.distributed.is_initialized():
-        if dp_mesh is not None:
-            dp_size = dp_mesh.size()
-            dp_rank = dp_mesh.get_local_rank()
-        else:
-            dp_size = get_world_size()
-            dp_rank = get_rank()
         local_batchSize = batchSize // dp_size
+        dp_rank = get_rank() // tp_size
         train_sampler = DistributedSampler(trainSet, num_replicas=dp_size, rank=dp_rank, shuffle=True)
         val_sampler = DistributedSampler(valSet, num_replicas=dp_size, rank=dp_rank, shuffle=False)
     else:
@@ -128,7 +124,7 @@ def getDataLoaders(dataFile,
         valid_batchSize = len(valSet)
     else:
         train_batchSize = local_batchSize
-        valid_batchSize = 1
+        valid_batchSize = val_batchSize  if val_batchSize is not None else local_batchSize 
 
     print_rank0(f'Using GlobalBatchSize: {batchSize}, train localBatchSize: {train_batchSize}, validation localBatchSize: {valid_batchSize}')
     trainLoader = DataLoader(trainSet, batch_size=train_batchSize, sampler=train_sampler, shuffle=(train_sampler is None), num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
