@@ -358,15 +358,21 @@ class FourierNeuralOperator:
                     nvtx.range_push("loss")
                 loss = self.lossFunction(pred, ref)
                 if self.TP_enabled:
-                    local_loss = loss.detach()
-                    if iBatch < 2:
-                        print_rank0(f"Train Batch {iBatch} in {self.epochs} has tp_loss: {local_loss}\n")
-                    dist.all_reduce(loss, op=dist.ReduceOp.AVG, group=self.tp_mesh.get_group()) # over all particles
+                    # All-reduce for logging (detached, outside graph)
+                    #local_loss = loss.detach()
+                    tensor_loss = loss.detach().clone()
+                    #if iBatch < 2:
+                    #    print_rank0(f"Train Batch {iBatch} in {self.epochs} has tp_loss: {local_loss}\n")
+                    #dist.all_reduce(loss, op=dist.ReduceOp.AVG, group=self.tp_mesh.get_group()) # over all particles
+                    dist.all_reduce(tensor_loss, op=dist.ReduceOp.AVG, group=self.tp_mesh.get_group()) # over all particles
+                    total_loss += tensor_loss.detach()
+                else:
+                    total_loss += loss.detach()
                 if self.enable_profile:
                     nvtx.range_pop() # end loss
 
             
-            total_loss += loss.detach()                
+            #total_loss += loss.detach()                
             optimizer.zero_grad()
 
             if self.benchmark and iBatch % 10 == 0:
@@ -382,6 +388,12 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 nvtx.range_pop()  # end backward
 
+            if self.TP_enabled:
+                # allreduce tp gradients
+                for param in model.parameters():
+                    if param.grad is not None:
+                        dist.all_reduce(param.grad, group=self.tp_mesh.get_group())
+                        param.grad /= self.tp_size
 
             if self.debug:
                 any_grad_nonzero = False

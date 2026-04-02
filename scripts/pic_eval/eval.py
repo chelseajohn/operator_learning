@@ -83,7 +83,7 @@ vis = PICVisualizer(args)
 
 if checkpoint is not None:
     fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
-    posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, timePred = vis.picND(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
+    posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, EzpPred, timePred = vis.picND(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
     phase_spacePred = None
 
 else:
@@ -94,13 +94,14 @@ else:
     pPred = None
     ExpPred = None
     EypPred = None
+    EzpPred = None
     timePred = None
     phase_spacePred = None
     growth_ratePred = None
     speedup = 1
 
 if predOnly is False:
-    posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, EypRef, timeRef = vis.picND(ml_acc=False)
+    posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, EypRef, EzpRef, timeRef = vis.picND(ml_acc=False)
     phase_spaceRef = None
 else:
     EnergyRef = None
@@ -110,6 +111,7 @@ else:
     pRef = None
     ExpRef = None
     EypRef = None
+    EzpRef = None
     timeRef = None
     phase_spaceRef = None
     growth_rateRef = None
@@ -118,9 +120,9 @@ else:
 energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EpRef=EpRef, EkPred=EkPred, EpPred=EpPred)
 conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
 if ((testCase == "weakLandau") or (testCase == "strongLandau")):
-    landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
+    landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=testCase)
 elif ((testCase == "tsi") or (testCase == "bti")):
-    growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, label=testCase)
+    growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=testCase)
 
 HEADER = """
 # FNO evaluation for PIC in {dim}D on {device}

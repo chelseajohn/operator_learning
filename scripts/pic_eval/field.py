@@ -8,7 +8,7 @@ sys.path.append(str(base_path))
 import numpy as np
 import cupy as cp
 
-def fieldInFourier(rhoHat: cp.ndarray, L: cp.ndarray, dim: int) -> tuple[cp.ndarray, cp.ndarray]:
+def fieldInFourier(rhoHat, L, dim, testCase, ref, J, T1, Q=None, T2=None):
     """
     Compute the Fourier coefficients of the electrostatic potential and electric field from charge density.
 
@@ -16,6 +16,7 @@ def fieldInFourier(rhoHat: cp.ndarray, L: cp.ndarray, dim: int) -> tuple[cp.ndar
         rhoHat (cp.ndarray): Fourier transform of the charge density (1D array).
         L (cp.ndarray): Domain length.
         dim (int): Dimension.
+        testCase (str): Testcase label.
 
     Returns:
         phiHat (cp.ndarray): Fourier coefficients of the electrostatic potential.
@@ -42,34 +43,108 @@ def fieldInFourier(rhoHat: cp.ndarray, L: cp.ndarray, dim: int) -> tuple[cp.ndar
         #phiHat = cp.concatenate([[0], rho_modes * (L / (2 * cp.pi * K)) ** 2])
         #EHat   = cp.concatenate([[0], rho_modes * (L / (2j * cp.pi * K))])
         #EHat[N // 2] = 0
+    elif(dim == 2):
+        if(testCase == 'cyclotron'):
+            if(ref == 'pif'):
+                phiHat = Q * T1 * rhoHat # /phi in Fourier space
+                coeff1 = Q * T2 * rhoHat * -1j * cp.transpose(J)[::2, ::2] # Not exactly Electric field! Notice it convolutes twice with shape function
+                coeff2 = Q * T2 * rhoHat * -1j * J[::2, ::2] 
+                coeff1 = cp.array(coeff1, order="C")
+                coeff2 = cp.array(coeff2, order="C")
+                EHat = cp.array([coeff1, coeff2])
+            else:
+                phiHat = T1 * rhoHat
+                E1_Hat = phiHat * -1j * cp.transpose(J)[::2, ::2]
+                E2_Hat = phiHat * -1j * J[::2, ::2]
+                EHat = cp.array([E1_Hat, E2_Hat])
+
+        else:
+            Ja = cp.arange(rhoHat.shape[0] // 2)
+            Jb = Ja[:0:-1]
+            J = cp.append(cp.append(Ja, [-rhoHat.shape[0] // 2]), - Jb)
+            Ka = cp.arange(rhoHat.shape[1] // 2)
+            Kb = Ka[:0:-1]
+            K = cp.append(cp.append(Ka, [-rhoHat.shape[1] // 2]), - Kb)
+            J = cp.transpose(cp.expand_dims(J, 0).repeat(rhoHat.shape[1], axis=0)) * 2 * cp.pi / L[0]
+            K = cp.expand_dims(K, 0).repeat(rhoHat.shape[0], axis=0) * 2 * cp.pi / L[1]
+            absolute = J ** 2 + K ** 2
+            absolute[0,0] = 1
+            phiHat = rhoHat / absolute
+            phiHat[0,0] = 0
+            E0 = phiHat * -1j * J
+            E1 = phiHat * -1J * K
+            # Zero out Nyquist modes to ensure real symmetry and avoid spurious anisotropy
+            phiHat[rhoHat.shape[0]//2, :] = 0
+            phiHat[:, rhoHat.shape[1]//2] = 0
+            E0[rhoHat.shape[0]//2, :] = 0
+            E0[:, rhoHat.shape[1]//2] = 0
+            E1[rhoHat.shape[0]//2, :] = 0
+            E1[:, rhoHat.shape[1]//2] = 0
+            EHat = cp.array([E0, E1])
     else:
+        # build kx
         Ja = cp.arange(rhoHat.shape[0] // 2)
         Jb = Ja[:0:-1]
-        J = cp.append(cp.append(Ja, [-rhoHat.shape[0] // 2]), - Jb)
+        J = cp.append(cp.append(Ja, [-rhoHat.shape[0] // 2]), -Jb)
+        
+        # build ky
         Ka = cp.arange(rhoHat.shape[1] // 2)
         Kb = Ka[:0:-1]
-        K = cp.append(cp.append(Ka, [-rhoHat.shape[1] // 2]), - Kb)
-        J = cp.transpose(cp.expand_dims(J, 0).repeat(rhoHat.shape[1], axis=0)) * 2 * cp.pi / L[0]
-        K = cp.expand_dims(K, 0).repeat(rhoHat.shape[0], axis=0) * 2 * cp.pi / L[1]
-        absolute = J ** 2 + K ** 2
-        absolute[0,0] = 1
+        K = cp.append(cp.append(Ka, [-rhoHat.shape[1] // 2]), -Kb)
+        
+        # build kz
+        La = cp.arange(rhoHat.shape[2] // 2)
+        Lb = La[:0:-1]
+        Lk = cp.append(cp.append(La, [-rhoHat.shape[2] // 2]), -Lb)
+        
+        # scale to physical wavenumbers
+        J = J * (2 * cp.pi / L[0])
+        K = K * (2 * cp.pi / L[1])
+        Lk = Lk * (2 * cp.pi / L[2])
+        
+        # expand to 3D grids
+        J = J[:, None, None]
+        K = K[None, :, None]
+        Lk = Lk[None, None, :]
+        
+        # Laplacian in Fourier space
+        absolute = J**2 + K**2 + Lk**2
+        absolute[0, 0, 0] = 1  # avoid divide by zero
+        
+        # solve Poisson
         phiHat = rhoHat / absolute
-        phiHat[0,0] = 0
-        E0 = phiHat * -1j * J
-        E1 = phiHat * -1J * K
-        # Zero out Nyquist modes to ensure real symmetry and avoid spurious anisotropy
-        phiHat[rhoHat.shape[0]//2, :] = 0
-        phiHat[:, rhoHat.shape[1]//2] = 0
-        E0[rhoHat.shape[0]//2, :] = 0
-        E0[:, rhoHat.shape[1]//2] = 0
-        E1[rhoHat.shape[0]//2, :] = 0
-        E1[:, rhoHat.shape[1]//2] = 0
-        EHat = cp.array([E0, E1])
+        phiHat[0, 0, 0] = 0  # enforce neutrality
+        
+        # electric field (E = -grad phi)
+        E0 = -1j * J * phiHat
+        E1 = -1j * K * phiHat
+        E2 = -1j * Lk * phiHat
+        
+        # --- Nyquist cleanup (VERY important in 3D) ---
+        nx, ny, nz = rhoHat.shape
+        
+        phiHat[nx//2, :, :] = 0
+        phiHat[:, ny//2, :] = 0
+        phiHat[:, :, nz//2] = 0
+        
+        E0[nx//2, :, :] = 0
+        E0[:, ny//2, :] = 0
+        E0[:, :, nz//2] = 0
+        
+        E1[nx//2, :, :] = 0
+        E1[:, ny//2, :] = 0
+        E1[:, :, nz//2] = 0
+        
+        E2[nx//2, :, :] = 0
+        E2[:, ny//2, :] = 0
+        E2[:, :, nz//2] = 0
+        
+        EHat = cp.array([E0, E1, E2])
 
     return phiHat, EHat
 
 
-def field(rho: cp.ndarray, L: cp.ndarray, dim:int) -> tuple[cp.ndarray, cp.ndarray]:
+def field(rho, L, dim, J, T1, testCase, NG):
     """
     Compute the real-space electrostatic potential and electric field from charge density.
 
@@ -92,10 +167,18 @@ def field(rho: cp.ndarray, L: cp.ndarray, dim:int) -> tuple[cp.ndarray, cp.ndarr
         phi = cp.real(cp.fft.ifft(phiHat)).ravel()
         E = cp.real(cp.fft.ifft(EHat)).ravel()
     else:
-        rhoHat = cp.fft.fft2(rho)
-        phiHat, EHat = fieldInFourier(rhoHat, L, dim)
+        if(testCase == 'cyclotron'):
+            extension = 4
+            rhoHat = cp.fft.fft2(rho, s=[extension*NG//2, extension*NG//2]) * 4
+        else:
+            rhoHat = cp.fft.fft2(rho)
+        phiHat, EHat = fieldInFourier(rhoHat, L, dim, testCase, 'pic', J, T1)
         phi = cp.real(cp.fft.ifft2(phiHat))
-        E = cp.real(cp.array([cp.fft.ifft2(EHat[0]), cp.fft.ifft2(EHat[1])]))
+        if(testCase == 'cyclotron'):
+            extension = 4
+            E = cp.real(cp.array([cp.fft.ifft2(EHat[0])[extension*NG//4:extension*NG//2, extension*NG//4:extension*NG//2], cp.fft.ifft2(EHat[1])[extension*NG//4:extension*NG//2, extension*NG//4:extension*NG//2]]))
+        else:
+            E = cp.real(cp.array([cp.fft.ifft2(EHat[0]), cp.fft.ifft2(EHat[1])]))
 
     return phi, E
 

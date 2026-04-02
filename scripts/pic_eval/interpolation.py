@@ -103,7 +103,7 @@ def interpolate(M: sparsecp.csr_matrix, DX: cp.ndarray, L: cp.ndarray, NG: int, 
     else:
         return (Q / (DX[0]*DX[1])) * M.sum(0).reshape([int(L[0]/DX[0]), int(L[1]/DX[1])])
 
-def scatterFourier(XP, SHat, NG, N, Q, L, dim, wp=1):
+def scatterFourier(XP, SHat, NG, N, Q, L, dim, testCase, wp=1):
     """
     Spectrally interpolate particle charges to Fourier-space grid using NUFFT.
 
@@ -114,6 +114,7 @@ def scatterFourier(XP, SHat, NG, N, Q, L, dim, wp=1):
         N (int): Number of particles.
         Q (float): Particle charge.
         L (cp.ndarray): Domain lengths in each dimension as an array.
+        testCase (str): Testcase label
         wp (float, optional): Particle weights. Default is 1.
 
     Returns:
@@ -132,39 +133,94 @@ def scatterFourier(XP, SHat, NG, N, Q, L, dim, wp=1):
                 isign=-1,
                 modeord=1)) / L[0]
 
+    elif(dim == 2):
+        if(testCase == 'cyclotron'):
+            # Note this is not exactly rhoHat as it is not multiplied 
+            # by Q and SHat but this is what is needed in the free space
+            # PIF algorithm
+            rhoHat = cufinufft.nufft2d1(
+                    XP[0] * cp.pi / L[0],
+                    XP[1] * cp.pi / L[1],
+                    0j + cp.zeros(N) + wp,
+                    n_modes=(2*NG,2*NG),
+                    eps=1e-12,
+                    isign=-1,
+                    modeord=1) / (L[0] * L[1])
+            #rhoHat = Q * SHat[::2,::2] * (cufinufft.nufft2d1(
+            #        XP[0] * cp.pi / L[0],
+            #        XP[1] * cp.pi / L[1],
+            #        0j + cp.zeros(N) + wp,
+            #        n_modes=(2*NG,2*NG),
+            #        eps=1e-12,
+            #        isign=-1,
+            #        modeord=1)) / (L[0] * L[1])
+
+        else:
+            rhoHat = Q * SHat * (cufinufft.nufft2d1(
+                    XP[0] * 2 * cp.pi / L[0],
+                    XP[1] * 2 * cp.pi / L[1],
+                    0j + cp.zeros(N) + wp,
+                    n_modes=(NG,NG),
+                    eps=1e-12,
+                    isign=-1,
+                    modeord=1)) / (L[0] * L[1])
     else:
-        rhoHat = Q * SHat * (cufinufft.nufft2d1(
+        rhoHat = Q * SHat * (cufinufft.nufft3d1(
                 XP[0] * 2 * cp.pi / L[0],
                 XP[1] * 2 * cp.pi / L[1],
+                XP[2] * 2 * cp.pi / L[2],
                 0j + cp.zeros(N) + wp,
-                n_modes=(NG,NG),
+                n_modes=(NG,NG,NG),
                 eps=1e-12,
                 isign=-1,
-                modeord=1)) / (L[0] * L[1])
+                modeord=1)) / (L[0] * L[1] * L[2])
 
     return rhoHat
 
 
-def gatherFourier(XP, EHat, SHat, QM, L, dim, wp=1):
+def gatherFourier(XP, EHat, SHat, QM, L, dim, testCase, wp=1):
     if dim == 1:
         coeff1 = EHat * SHat
         Ep = cp.real(cufinufft.nufft1d2(XP[0] * 2 * cp.pi / L[0], coeff1, eps=1e-12, isign=1, modeord=1))
         a = (QM / wp) * Ep
+    elif(dim == 2):
+        if(testCase == 'cyclotron'):
+            assert dim == 2, 'Cyclotron test case only for 2D' 
+            Exp = cp.real(cufinufft.nufft2d2(XP[0] * cp.pi / L[0] + cp.pi, XP[1] * cp.pi / L[1] + cp.pi, EHat[0], eps=1e-12, isign=1, modeord=1))
+            Eyp = cp.real(cufinufft.nufft2d2(XP[0] * cp.pi / L[0] + cp.pi, XP[1] * cp.pi / L[1] + cp.pi, EHat[1], eps=1e-12, isign=1, modeord=1))
+            a1 = (QM / wp) * Exp
+            a2 = (QM / wp) * Eyp
+            Ep = cp.stack([Exp, Eyp], axis=0)
+            a = cp.stack([a1, a2], axis=0)
+
+        else:
+            coeff1 = EHat[0] * SHat
+            Exp = cp.real(cufinufft.nufft2d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], coeff1, eps=1e-12, isign=1, modeord=1))
+            coeff2 = EHat[1] * SHat
+            Eyp = cp.real(cufinufft.nufft2d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], coeff2, eps=1e-12, isign=1, modeord=1))
+            a1 = (QM / wp) * Exp
+            a2 = (QM / wp) * Eyp
+            Ep = cp.stack([Exp, Eyp], axis=0)
+            a = cp.stack([a1, a2], axis=0)
     else:
         coeff1 = EHat[0] * SHat
-        Exp = cp.real(cufinufft.nufft2d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], coeff1, eps=1e-12, isign=1, modeord=1))
+        Exp = cp.real(cufinufft.nufft3d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], XP[2] * 2 * cp.pi / L[2], coeff1, eps=1e-12, isign=1, modeord=1))
         coeff2 = EHat[1] * SHat
-        Eyp = cp.real(cufinufft.nufft2d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], coeff2, eps=1e-12, isign=1, modeord=1))
+        Eyp = cp.real(cufinufft.nufft3d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], XP[2] * 2 * cp.pi / L[2], coeff2, eps=1e-12, isign=1, modeord=1))
+        coeff3 = EHat[2] * SHat
+        Ezp = cp.real(cufinufft.nufft3d2(XP[0] * 2 * cp.pi / L[0], XP[1] * 2 * cp.pi / L[1], XP[2] * 2 * cp.pi / L[2], coeff3, eps=1e-12, isign=1, modeord=1))
         a1 = (QM / wp) * Exp
         a2 = (QM / wp) * Eyp
-        Ep = cp.stack([Exp, Eyp], axis=0)
-        a = cp.stack([a1, a2], axis=0)
+        a3 = (QM / wp) * Ezp
+        Ep = cp.stack([Exp, Eyp, Ezp], axis=0)
+        a = cp.stack([a1, a2, a3], axis=0)
         
 
     return Ep, a
 
 
 def p2g_g2p_nostencil_arrays(XP, DX, NG, L, dim,
+                             testCase,
                              Q=None, rho_back=0.0,
                              E=None, QM=None,
                              return_Ep=True):
@@ -224,9 +280,13 @@ def p2g_g2p_nostencil_arrays(XP, DX, NG, L, dim,
         gx0 = cp.floor(x / dx).astype(cp.int32)
         gy0 = cp.floor(y / dy).astype(cp.int32)
 
-        #For periodic wrapping
-        gx = cp.stack([gx0-1, gx0, gx0+1], axis=0) % NGx
-        gy = cp.stack([gy0-1, gy0, gy0+1], axis=0) % NGy
+        if(testCase == 'cyclotron'):
+            gx = cp.stack([gx0-1, gx0, gx0+1], axis=0)
+            gy = cp.stack([gy0-1, gy0, gy0+1], axis=0)
+        else:
+            #For periodic wrapping
+            gx = cp.stack([gx0-1, gx0, gx0+1], axis=0) % NGx
+            gy = cp.stack([gy0-1, gy0, gy0+1], axis=0) % NGy
         
         a_ = x % dx
         b_ = y % dy
@@ -264,7 +324,10 @@ def p2g_g2p_nostencil_arrays(XP, DX, NG, L, dim,
             scatter_add(rho_flat, flat(gx[1], gy[2]), H)
             scatter_add(rho_flat, flat(gx[2], gy[2]), I)
 
-            rho = (Q / (dx*dy)) * rho_flat.reshape(NGx, NGy) + rho_back
+            rho = (Q / (dx*dy)) * rho_flat.reshape(NGx, NGy)
+
+            if(testCase != 'cyclotron'):
+                rho  = rho + rho_back
 
         if E is not None:
             Ex = E[0].reshape(-1)

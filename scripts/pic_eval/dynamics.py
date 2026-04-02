@@ -71,7 +71,8 @@ def accelerateML(E: cp.ndarray, wp: float, QM: float):
 def push(vp: cp.ndarray, a: cp.ndarray, 
          DT: float, Q: float, 
          QM: float, wp: float,
-         it: int):
+         it: int, testCase: str,
+         B0: cp.array):
     """
     Update particle velocities using leapfrog integration and compute kinetic energy.
 
@@ -83,15 +84,34 @@ def push(vp: cp.ndarray, a: cp.ndarray,
         QM (float): Charge-to-mass ratio (q/m).
         wp (float): Particle weights.
         it (int): Current timestep index.
+        testCase (str): Testcase label
+        B0 (cp.array): External magnetic field for cyclotron test case
 
     Returns:
         vp_new (cp.ndarray): Updated particle velocities.
         kinetic_energy (float): Kinetic energy after update.
     """
     if it == 0:
-        return vp + a * DT / 2, kinetic(vp + a * DT / 2, Q, QM, wp)
+        if(testCase == 'cyclotron'):
+            Ek = kinetic(vp, Q, QM, wp)
+            vp = vp + DT * (a + QM * cp.cross(vp, B0, axisa=0)[:, 0:2].T) / 2
+            return vp, Ek
+        else:
+            #return vp + a * DT / 2, kinetic(vp + a * DT / 2, Q, QM, wp)
+            return vp + a * DT / 2, kinetic(vp, Q, QM, wp)
+
     else:
-        return vp + a * DT, kinetic(vp + a * DT, Q, QM, wp)
+        if(testCase == 'cyclotron'):
+            Vm = vp + a * DT / 2
+            Vprime = Vm + cp.cross(Vm, B0, axisa=0)[:, 0:2].T * QM * DT / 2
+            Vp = Vm + cp.cross(Vprime, B0, axisa=0)[:, 0:2].T * QM * DT / (1 + (cp.linalg.norm(B0)*QM*DT/2) ** 2)
+            new_vp = Vp + a * DT / 2
+            Ek = kinetic((vp + new_vp) / 2, Q, QM, wp)
+            vp = new_vp
+            return vp, Ek
+        else:
+            #return vp + a * DT, kinetic(vp + a * DT, Q, QM, wp)
+            return vp + a * DT, kinetic((vp + (vp + a * DT))/2, Q, QM, wp)
 
 
 def move(xp: cp.ndarray, vp: cp.ndarray,
