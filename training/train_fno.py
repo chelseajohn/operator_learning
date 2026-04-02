@@ -105,13 +105,8 @@ class FourierNeuralOperator:
                         self.world_size % self.tp_size == 0
                     ), f"World size {self.world_size} needs to be divisible by TP size {self.tp_size}"
                 assert (self.DDP_enabled == True), f"Cannot perform input sharding without DDP!"
-                self.batch_idx = self.rank // self.tp_size
                 self.shard_idx = self.rank % self.tp_size
                 self.effective_batches = self.world_size // self.tp_size  
-                # self.tp_ranks = [self.batch_idx * self.tp_size + i 
-                #     for i in range(self.tp_size)
-                # ]
-                # self.tp_mesh = dist.new_group(ranks=self.tp_ranks)
                 self.device_mesh = init_device_mesh(device_type=self.autocast_device_type,
                                                 mesh_shape=(self.effective_batches, self.tp_size),
                                                 mesh_dim_names=("dp", "tp")
