@@ -111,6 +111,8 @@ class FourierNeuralOperator:
                                                 mesh_shape=(self.effective_batches, self.tp_size),
                                                 mesh_dim_names=("dp", "tp")
                                                 )
+                self.dp_mesh = self.device_mesh["dp"]
+                self.dp_size = self.effective_batches
                 self.tp_mesh = self.device_mesh["tp"]
                 self.tp_rank = self.tp_mesh.get_local_rank()
                 print(f'[Rank {self.rank}]: {self.tp_mesh.mesh}')
@@ -342,11 +344,11 @@ class FourierNeuralOperator:
                 if self.TP_enabled:
                     # All-reduce for logging (detached, outside graph)
                     local_loss = loss.detach()
-                    if iBatch < 2:
-                       print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has tp_loss: {local_loss}\n")
+                    #if iBatch < 2:
+                    #   print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has tp_loss: {local_loss}\n")
                     dist.all_reduce(local_loss, op=dist.ReduceOp.AVG, group=self.tp_mesh.get_group()) # over all particles
-                    if iBatch < 2:
-                       print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss}\n")
+                    #if iBatch < 2:
+                    #   print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss}\n")
                     total_loss += local_loss
                 else:
                     total_loss += loss.detach()
@@ -445,9 +447,13 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 nvtx.range_push(f"TrainEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
+            if self.TP_enabled:
+                dp_group = self.dp_mesh.get_group()
+            else:
+                dp_group = None
             dist.all_reduce(avg_loss, 
                             op=dist.ReduceOp.AVG, 
-                            group=None)
+                            group=dp_group)
             if self.enable_profile:
                 nvtx.range_pop()  # end ddploss
         
@@ -516,61 +522,71 @@ class FourierNeuralOperator:
 
                 pred = model(inp)
                 local_loss = self.lossFunction(pred,ref)
-                # error = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))/torch.mean(torch.abs(ref.flatten(start_dim=1))) * 100
+                error_nr = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))
+                error_dr = torch.mean(torch.abs(ref.flatten(start_dim=1)))
                 # local_errors[iBatch] = error.detach()
                 if self.TP_enabled:
                     # only for logging 
                     loss_tensor = local_loss.detach()
-                    if iBatch < 2:
-                       print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has tp_loss: {local_loss}\n")
+                    #if iBatch < 2:
+                    #   print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has tp_loss: {local_loss}\n")
                     dist.all_reduce(loss_tensor, 
                                     op=dist.ReduceOp.AVG,
                                     group=self.tp_mesh.get_group()) # over all particles
-                    if iBatch < 2:
-                       print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has full_loss: {loss_tensor}\n")
+                    #if iBatch < 2:
+                    #   print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has full_loss: {loss_tensor}\n")
                     total_loss += loss_tensor
 
-                #     error_tensor = error.detach().clone()
-                #     dist.all_reduce(error_tensor,
-                #                     op=dist.ReduceOp.AVG,
-                #                     group=self.tp_mesh.get_group())  # over all particles
-                #     relative_error += error_tensor
+                    error_tensor_nr = error_nr.detach().clone()
+                    error_tensor_dr = error_dr.detach().clone()
+                    dist.all_reduce(error_tensor_nr,
+                                    op=dist.ReduceOp.AVG,
+                                    group=self.tp_mesh.get_group())  # over all particles
+                    dist.all_reduce(error_tensor_dr,
+                                    op=dist.ReduceOp.AVG,
+                                    group=self.tp_mesh.get_group())  # over all particles
+                    local_errors[iBatch] = (error_tensor_nr / error_tensor_dr) * 100
                 
                 else:
                     total_loss += local_loss.detach()
-                    # relative_error += error.detach()
+                    local_errors[iBatch] = (error_nr / error_dr) * 100
        
+                relative_error += local_errors[iBatch]
                 if self.enable_profile:
                     nvtx.range_pop() # end forward
 
         avg_loss = total_loss/nBatches
-        # relative_error = relative_error / nBatches
+        relative_error = relative_error / nBatches
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
+            if self.TP_enabled:
+                dp_group = self.dp_mesh.get_group()
+            else:
+                dp_group = None
             # Obtain the global average loss.
             dist.all_reduce(avg_loss, 
                             op=dist.ReduceOp.AVG, 
-                            group=None)
-            # dist.all_reduce(relative_error,
-            #                 op=dist.ReduceOp.AVG, 
-            #                 group=self.dp_group)
-            # local_errors = local_errors.to(self.device)
-            # out = torch.zeros(self.world_size * local_errors.numel(),
-            #                   device=local_errors.device,
-            #                   dtype=local_errors.dtype)
-            # dist.all_gather_into_tensor(out, local_errors)
-            # median_error = out.median().item()
+                            group=dp_group)
+            relative_error = relative_error.to(self.device)
+            dist.all_reduce(relative_error,
+                            op=dist.ReduceOp.AVG, 
+                            group=dp_group)
+            local_errors = local_errors.to(self.device)
+            out = torch.zeros(self.dp_size * local_errors.numel(),
+                              device=local_errors.device,
+                              dtype=local_errors.dtype)
+            dist.all_gather_into_tensor(out, local_errors, group=dp_group)
+            median_error = out.median().item()
             if self.enable_profile:
                 nvtx.range_pop() # end ddploss
-        # else:
-        #     median_error = local_errors.median().item()
+        else:
+            median_error = local_errors.median().item()
       
         val_loss = avg_loss.item() # loss per gpu
-        # val_error = relative_error.item()
+        val_error = relative_error.item()
         self.losses["model"]["valid"] = val_loss
-        print_rank0(f"Validation Epoch {self.epochs}: AvgLoss={val_loss:.4e}")
-        # TestError={val_error:.2f}% MedianTestError={median_error:.4f}% (id: {idLoss:>7f})\n")
+        print_rank0(f"Validation Epoch {self.epochs}: AvgLoss={val_loss:.4e} TestError={val_error:.2f}% MedianTestError={median_error:.4f}% (id: {idLoss:>7f})\n")
 
     def learn(self, nEpoch, save_interval=100):
         self.epochs += 1
