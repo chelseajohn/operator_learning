@@ -353,12 +353,12 @@ class FourierNeuralOperator:
                     #    print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss}\n")
                     total_loss += local_loss
                 else:
-                    if iBatch < 2:
-                        print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {loss.detach()}\n")
+                    #if iBatch < 2:
+                    #    print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {loss.detach()}\n")
                     total_loss += loss.detach()
                 
-                if iBatch < 2:
-                    print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has loss: {total_loss}\n")
+                #if iBatch < 2:
+                #    print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has loss: {total_loss}\n")
                 if self.enable_profile:
                     nvtx.range_pop() # end loss
            
@@ -556,13 +556,13 @@ class FourierNeuralOperator:
                     local_errors[iBatch] = (error_tensor_nr / error_tensor_dr) * 100
                 
                 else:
-                    if iBatch < 2:
-                        print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss.detach()}\n")
+                    #if iBatch < 2:
+                    #    print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss.detach()}\n")
                     total_loss += local_loss.detach()
                     local_errors[iBatch] = (error_nr / error_dr) * 100
                     
-                if iBatch < 2:
-                    print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has loss: {total_loss}\n")
+                #if iBatch < 2:
+                #    print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has loss: {total_loss}\n")
        
                 relative_error += local_errors[iBatch]
                 if self.enable_profile:
