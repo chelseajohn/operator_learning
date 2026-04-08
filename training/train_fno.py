@@ -118,7 +118,7 @@ class FourierNeuralOperator:
                 self.effective_dp_mesh = self.device_mesh["dp"]
                 self.tp_rank = self.tp_mesh.get_local_rank()
                 
-                print_rank0(f'Using an effective DDP size: self.effective_dp_size')
+                print_rank0(f'Using an effective DDP size: {self.effective_dp_size}')
         else:
             self.DDP_enabled = False
             self.TP_enabled = False
