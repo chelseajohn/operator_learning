@@ -10,7 +10,6 @@ from operator_learning.utils.misc import print_rank0
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer, NUFFTLayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
 from operator_learning.data.transforms.vandermonde_matrix_free import VandermondeTransformMatrixFree
-#from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
 
 class FNOLayer(nn.Module):
 
@@ -134,7 +133,7 @@ class FNO(nn.Module):
         self.dataClass = dataClass
         self.dataset = dataset if dataClass == 'rbc' else None
         self.data_type = torch.float16 if use_complex_amp and self.training else torch.float32
-        self.device_mesh = kwargs.get("device_mesh", None)
+        self.tp_mesh = kwargs.get("tp_mesh", None)
         self.matrix_free = matrix_free
 
         if use_dse:
@@ -145,10 +144,11 @@ class FNO(nn.Module):
                           bias=bias,
                           dim=n_dims,
                           use_complex_amp=use_complex_amp,
-                          device_mesh=self.device_mesh,
+                          tp_mesh=self.tp_mesh,
                          )
                  for _ in range(n_layers)])
         # elif use_toeplitz:
+        #     from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
         #     self.layers = nn.ModuleList(
         #         [NUFFTLayer(dv=dv, 
         #                   kX=kX, dataClass=dataClass,
@@ -158,6 +158,7 @@ class FNO(nn.Module):
         #                   use_complex_amp=use_complex_amp)
         #          for _ in range(n_layers)])
         elif use_kb:
+            from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
             self.layers = nn.ModuleList(
                 [NUFFTLayer(dv=dv,
                           kX=kX, dataClass=dataClass,

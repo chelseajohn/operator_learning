@@ -17,7 +17,8 @@ data:
   seed: null
   dataFile: Datasets_3D_electrostatic_plasma/PIF3D_sl_penning_100k_QL_normalize.h5
   trainRatio: 0.8
-  batchSize:  12       # Global Batch size 
+  batchSize: 12        # Train Global Batch size
+  val_batchSize: 1     # validation local Batch size 
   sampling_mode: None  # [fixed, ordered, random]
  
 
