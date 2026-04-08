@@ -99,6 +99,7 @@ class FourierNeuralOperator:
                 self.local_rank = self.communicator.local_rank
                 self.dp_size = self.world_size
                 self.effective_batches = self.world_size # effective number of batches per iter
+                print_rank0(f'Using DDP with {self.dp_size} GPUs and Input sharding with {self.tp_size} GPUs.')
 
             if self.TP_enabled:
                 assert (
@@ -111,12 +112,12 @@ class FourierNeuralOperator:
                                                 mesh_shape=(self.effective_batches, self.tp_size),
                                                 mesh_dim_names=("dp", "tp")
                                                 )
-                self.dp_mesh = self.device_mesh["dp"]
-                self.dp_size = self.effective_batches
+                self.effective_dp_mesh = self.device_mesh["dp"]
+                self.effective_dp_size = self.effective_batches
                 self.tp_mesh = self.device_mesh["tp"]
                 self.tp_rank = self.tp_mesh.get_local_rank()
-                print(f'[Rank {self.rank}]: {self.tp_mesh.mesh}')
-            print_rank0(f'Using DDP with {self.dp_size} GPUs and Input sharding with {self.tp_size} GPUs.')
+                #print(f'[Rank {self.rank}]: {self.tp_mesh.mesh}')
+                print_rank0(f'Using an effective DDP size: self.effective_dp_size')
         else:
             self.DDP_enabled = False
             self.TP_enabled = False
@@ -345,13 +346,16 @@ class FourierNeuralOperator:
                     # All-reduce for logging (detached, outside graph)
                     local_loss = loss.detach()
                     #if iBatch < 2:
-                    #   print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has tp_loss: {local_loss}\n")
+                    #    print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has tp_loss: {local_loss}\n")
                     dist.all_reduce(local_loss, op=dist.ReduceOp.AVG, group=self.tp_mesh.get_group()) # over all particles
                     #if iBatch < 2:
-                    #   print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss}\n")
+                    #    print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss}\n")
                     total_loss += local_loss
                 else:
                     total_loss += loss.detach()
+                
+                if iBatch < 2:
+                    print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has loss: {total_loss}\n")
                 if self.enable_profile:
                     nvtx.range_pop() # end loss
            
@@ -448,7 +452,7 @@ class FourierNeuralOperator:
                 nvtx.range_push(f"TrainEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
             if self.TP_enabled:
-                dp_group = self.dp_mesh.get_group()
+                dp_group = self.effective_dp_mesh.get_group()
             else:
                 dp_group = None
             dist.all_reduce(avg_loss, 
@@ -529,12 +533,12 @@ class FourierNeuralOperator:
                     # only for logging 
                     loss_tensor = local_loss.detach()
                     #if iBatch < 2:
-                    #   print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has tp_loss: {local_loss}\n")
+                    #    print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has tp_loss: {local_loss}\n")
                     dist.all_reduce(loss_tensor, 
                                     op=dist.ReduceOp.AVG,
                                     group=self.tp_mesh.get_group()) # over all particles
                     #if iBatch < 2:
-                    #   print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has full_loss: {loss_tensor}\n")
+                    #    print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has full_loss: {loss_tensor}\n")
                     total_loss += loss_tensor
 
                     error_tensor_nr = error_nr.detach().clone()
@@ -550,6 +554,9 @@ class FourierNeuralOperator:
                 else:
                     total_loss += local_loss.detach()
                     local_errors[iBatch] = (error_nr / error_dr) * 100
+                    
+                if iBatch < 2:
+                    print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has loss: {total_loss}\n")
        
                 relative_error += local_errors[iBatch]
                 if self.enable_profile:
@@ -561,9 +568,11 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
             if self.TP_enabled:
-                dp_group = self.dp_mesh.get_group()
+                dp_group = self.effective_dp_mesh.get_group()
+                effective_dp_size = self.effective_dp_size
             else:
                 dp_group = None
+                effective_dp_size = self.world_size
             # Obtain the global average loss.
             dist.all_reduce(avg_loss, 
                             op=dist.ReduceOp.AVG, 
@@ -573,7 +582,7 @@ class FourierNeuralOperator:
                             op=dist.ReduceOp.AVG, 
                             group=dp_group)
             local_errors = local_errors.to(self.device)
-            out = torch.zeros(self.dp_size * local_errors.numel(),
+            out = torch.zeros(effective_dp_size * local_errors.numel(),
                               device=local_errors.device,
                               dtype=local_errors.dtype)
             dist.all_gather_into_tensor(out, local_errors, group=dp_group)
