@@ -149,7 +149,7 @@ def field(rho, L, dim, J, T1, testCase, NG):
     Compute the real-space electrostatic potential and electric field from charge density.
 
     Args:
-        rho (cp.ndarray): Charge density in real space (1D array).
+        rho (cp.ndarray): Charge density in real space.
         L (cp.ndarray): Domain length.
         dim (int): Dimension
     Returns:
@@ -166,7 +166,7 @@ def field(rho, L, dim, J, T1, testCase, NG):
         phiHat, EHat = fieldInFourier(rhoHat, L[0], dim)
         phi = cp.real(cp.fft.ifft(phiHat)).ravel()
         E = cp.real(cp.fft.ifft(EHat)).ravel()
-    else:
+    elif dim == 2:
         if(testCase == 'cyclotron'):
             extension = 4
             rhoHat = cp.fft.fft2(rho, s=[extension*NG//2, extension*NG//2]) * 4
@@ -179,6 +179,11 @@ def field(rho, L, dim, J, T1, testCase, NG):
             E = cp.real(cp.array([cp.fft.ifft2(EHat[0])[extension*NG//4:extension*NG//2, extension*NG//4:extension*NG//2], cp.fft.ifft2(EHat[1])[extension*NG//4:extension*NG//2, extension*NG//4:extension*NG//2]]))
         else:
             E = cp.real(cp.array([cp.fft.ifft2(EHat[0]), cp.fft.ifft2(EHat[1])]))
+    else:
+        rhoHat = cp.fft.fftn(rho)
+        phiHat, EHat = fieldInFourier(rhoHat, L, dim, testCase, 'pic', J, T1)
+        phi = cp.real(cp.fft.ifftn(phiHat))
+        E = cp.real(cp.array([cp.fft.ifftn(EHat[0]), cp.fft.ifftn(EHat[1]), cp.fft.ifftn(EHat[2])]))
 
     return phi, E
 

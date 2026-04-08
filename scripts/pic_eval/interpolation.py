@@ -225,9 +225,9 @@ def p2g_g2p_nostencil_arrays(XP, DX, NG, L, dim,
                              E=None, QM=None,
                              return_Ep=True):
     """
-    Unified matrix-free PIC scatter/gather without 3N/9N arrays.
+    Unified matrix-free PIC scatter/gather without 3N/9N/27N arrays.
 
-    Fully vectorized on GPU, works for 1D and 2D.
+    Fully vectorized on GPU, works for 1D, 2D and 3D.
     """
     #N = wp.shape[0]
     #wp = wp.astype(dtype, copy=False)
@@ -352,4 +352,94 @@ def p2g_g2p_nostencil_arrays(XP, DX, NG, L, dim,
         return rho, Ep, a
 
     else:
-        raise ValueError("dim must be 1 or 2")
+        x = XP[0, :]
+        y = XP[1, :]
+        z = XP[2, :]
+        
+        NGx, NGy, NGz = int(NG), int(NG), int(NG)
+        dx, dy, dz = float(DX[0]), float(DX[1]), float(DX[2])
+        
+        # base cell indices
+        gx0 = cp.floor(x / dx).astype(cp.int32)
+        gy0 = cp.floor(y / dy).astype(cp.int32)
+        gz0 = cp.floor(z / dz).astype(cp.int32)
+        
+        # periodic stencil indices
+        gx = cp.stack([gx0-1, gx0, gx0+1], axis=0) % NGx
+        gy = cp.stack([gy0-1, gy0, gy0+1], axis=0) % NGy
+        gz = cp.stack([gz0-1, gz0, gz0+1], axis=0) % NGz
+        
+        # local coordinates
+        a_ = x % dx
+        b_ = y % dy
+        c_ = z % dz
+        
+        # normalization
+        tot = (dx * dy * dz)**2
+        
+        # 1D shape components (same pattern as 2D)
+        cx1 = (dx - a_)**2
+        cx2 = dx**2 + 2*dx*a_ - 2*a_**2
+        cx3 = a_**2
+        
+        cy1 = (dy - b_)**2
+        cy2 = dy**2 + 2*dy*b_ - 2*b_**2
+        cy3 = b_**2
+        
+        cz1 = (dz - c_)**2
+        cz2 = dz**2 + 2*dz*c_ - 2*c_**2
+        cz3 = c_**2
+        
+        # helper
+        def flat(ix, iy, iz):
+            return (NGy * NGz) * ix + NGz * iy + iz
+        
+        if Q is not None:
+            rho_flat = cp.zeros(NGx * NGy * NGz)
+
+            wx = [cx1, cx2, cx3]
+            wy = [cy1, cy2, cy3]
+            wz = [cz1, cz2, cz3]
+
+            # 27 stencil contributions
+            for i in range(3):
+                for j in range(3):
+                    for k in range(3):
+                        w = (wx[i] * wy[j] * wz[k]) / (8 * tot)
+                        scatter_add(rho_flat,
+                                    flat(gx[i], gy[j], gz[k]),
+                                    w)
+
+            rho = (Q / (dx * dy * dz)) * rho_flat.reshape(NGx, NGy, NGz)
+            rho = rho + rho_back
+
+        if E is not None:
+            Ex = E[0].reshape(-1)
+            Ey = E[1].reshape(-1)
+            Ez = E[2].reshape(-1)
+
+            Exp = 0.0
+            Eyp = 0.0
+            Ezp = 0.0
+
+            wx = [cx1, cx2, cx3]
+            wy = [cy1, cy2, cy3]
+            wz = [cz1, cz2, cz3]
+
+            for i in range(3):
+                for j in range(3):
+                    for k in range(3):
+                        w = (wx[i] * wy[j] * wz[k]) / (8 * tot)
+                        idx = flat(gx[i], gy[j], gz[k])
+
+                        Exp += w * Ex[idx]
+                        Eyp += w * Ey[idx]
+                        Ezp += w * Ez[idx]
+
+            if return_Ep:
+                Ep = cp.stack([Exp, Eyp, Ezp], axis=0)
+
+            if QM is not None:
+                a = QM * cp.stack([Exp, Eyp, Ezp], axis=0)
+        
+        return rho, Ep, a
