@@ -115,8 +115,9 @@ class FourierNeuralOperator:
                 self.effective_dp_mesh = self.device_mesh["dp"]
                 self.effective_dp_size = self.effective_batches
                 self.tp_mesh = self.device_mesh["tp"]
+                self.effective_dp_mesh = self.device_mesh["dp"]
                 self.tp_rank = self.tp_mesh.get_local_rank()
-                #print(f'[Rank {self.rank}]: {self.tp_mesh.mesh}')
+                
                 print_rank0(f'Using an effective DDP size: self.effective_dp_size')
         else:
             self.DDP_enabled = False
@@ -352,6 +353,8 @@ class FourierNeuralOperator:
                     #    print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss}\n")
                     total_loss += local_loss
                 else:
+                    if iBatch < 2:
+                        print(f"[Rank: {self.rank}]: Train Batch {iBatch} in epoch {self.epochs} has full_loss: {loss.detach()}\n")
                     total_loss += loss.detach()
                 
                 if iBatch < 2:
@@ -455,6 +458,7 @@ class FourierNeuralOperator:
                 dp_group = self.effective_dp_mesh.get_group()
             else:
                 dp_group = None
+            
             dist.all_reduce(avg_loss, 
                             op=dist.ReduceOp.AVG, 
                             group=dp_group)
@@ -552,6 +556,8 @@ class FourierNeuralOperator:
                     local_errors[iBatch] = (error_tensor_nr / error_tensor_dr) * 100
                 
                 else:
+                    if iBatch < 2:
+                        print(f"[Rank: {self.rank}]: Val Batch {iBatch} in epoch {self.epochs} has full_loss: {local_loss.detach()}\n")
                     total_loss += local_loss.detach()
                     local_errors[iBatch] = (error_nr / error_dr) * 100
                     
@@ -574,7 +580,8 @@ class FourierNeuralOperator:
                 dp_group = None
                 effective_dp_size = self.world_size
             # Obtain the global average loss.
-            dist.all_reduce(avg_loss, 
+            if self.TP_enabled:
+                dist.all_reduce(avg_loss, 
                             op=dist.ReduceOp.AVG, 
                             group=dp_group)
             relative_error = relative_error.to(self.device)
