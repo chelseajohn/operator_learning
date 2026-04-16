@@ -1,6 +1,7 @@
 import yaml
 import torch
 import torch.distributed as dist
+from torch.utils.flop_counter import FlopCounterMode
 from configmypy import Bunch
 import opt_einsum
 import unicodedata
@@ -179,7 +180,6 @@ def enable_tf32_only_on_a100():
     else:
         print_rank0(f"Not an A100 → TF32 NOT enabled: {name}")
 
-
 def slugify(value, allow_unicode=False):
     """
     Taken from https://github.com/django/django/blob/master/django/utils/text.py
@@ -196,3 +196,52 @@ def slugify(value, allow_unicode=False):
     value = re.sub(r'[^\w\s-]', '', value.lower())
     return re.sub(r'[-\s]  ', '-', value).strip('-_')
  
+def count_flops(
+    model: torch.nn.Module,
+    x: torch.tensor,
+    y: torch.tensor,
+    loss_fn: callable,
+    device: torch.device,
+    dtp_group: dist.ProcessGroup
+):
+    """
+    Count floating point operations [TFLOP] in forward and backward pass of the model.
+
+    FLOPs are accumulated over the entire group
+    """
+    x, y = x.to(device), y.to(device)
+    with FlopCounterMode(
+        display=False
+    ) as flop_counter:  # display=True breaks down by op
+            pred = model(x)
+
+    forward_flops = torch.tensor(flop_counter.get_total_flops(), device=device)
+    dist.all_reduce(forward_flops, group=dtp_group)
+
+    with FlopCounterMode(
+        display=False
+    ) as flop_counter:  # display=True breaks down by op
+        loss = loss_fn(pred, y)
+        loss.backward()
+
+    backward_flops = torch.tensor(flop_counter.get_total_flops(), device=device)
+    dist.all_reduce(backward_flops, group=dtp_group)
+
+    with FlopCounterMode(
+        display=False
+    ) as flop_counter:  # display=True breaks down by op
+        pred = model(x)
+        loss = loss_fn(pred, y)
+        loss.backward()
+
+    total_flops = torch.tensor(flop_counter.get_total_flops(), device=device)
+    dist.all_reduce(total_flops, group=dtp_group)
+
+    # if dist.get_rank(group=dtp_group) == 0:
+    #     print(f"Forward flops per iteration is {forward_flops / 1e12} TFLOP")
+    #     print(f"Backward flops per iteration is {backward_flops / 1e12} TFLOP")
+    #     print(
+    #         f"Total forward-backward flops per iteration is {total_flops / 1e12} TFLOP"
+    #     )
+
+    return forward_flops, backward_flops, total_flops

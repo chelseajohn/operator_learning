@@ -16,9 +16,16 @@ from operator_learning.data import getDataLoaders
 from operator_learning.model import FNO
 from operator_learning.loss import LOSSES_CLASSES
 from operator_learning.utils.communication import Communicator
-from operator_learning.utils.misc import print_rank0, NoScale, compile_timing, optimizer_step, scheduler_step
-from operator_learning.utils.misc import register_dtype_hooks, enable_tf32_only_on_a100
-
+from operator_learning.utils.misc import (
+    print_rank0,
+    NoScale,
+    compile_timing,
+    optimizer_step, 
+    scheduler_step,
+    register_dtype_hooks,
+    enable_tf32_only_on_a100,
+    count_flops
+)
 
 class FourierNeuralOperator:
 
@@ -88,6 +95,7 @@ class FourierNeuralOperator:
             self.TP_enabled = parallel_strategy.get("tp", False)
             self.tp_size = parallel_strategy.get("tp_size", 2) if self.TP_enabled else 1
             self.dp_size = 1
+            self.effective_dp_size = 1
             self.tp_mesh = None
     
             if self.DDP_enabled or self.TP_enabled:
@@ -98,8 +106,10 @@ class FourierNeuralOperator:
                 self.rank = self.communicator.rank
                 self.local_rank = self.communicator.local_rank
                 self.dp_size = self.world_size
-                self.effective_batches = self.world_size # effective number of batches per iter
+                self.dp_group = None
+                self.effective_dp_size = self.world_size
                 print_rank0(f'Using DDP with {self.dp_size} GPUs and Input sharding with {self.tp_size} GPUs.')
+    
 
             if self.TP_enabled:
                 assert (
@@ -107,24 +117,24 @@ class FourierNeuralOperator:
                     ), f"World size {self.world_size} needs to be divisible by TP size {self.tp_size}"
                 assert (self.DDP_enabled == True), f"Cannot perform input sharding without DDP!"
                 self.shard_idx = self.rank % self.tp_size
-                self.effective_batches = self.world_size // self.tp_size  
+                self.effective_dp_size = self.world_size // self.tp_size  
                 self.device_mesh = init_device_mesh(device_type=self.autocast_device_type,
-                                                mesh_shape=(self.effective_batches, self.tp_size),
+                                                mesh_shape=(self.effective_dp_size, self.tp_size),
                                                 mesh_dim_names=("dp", "tp")
                                                 )
                 self.effective_dp_mesh = self.device_mesh["dp"]
-                self.effective_dp_size = self.effective_batches
+                self.dp_group = self.effective_dp_mesh.get_group()
                 self.tp_mesh = self.device_mesh["tp"]
-                self.effective_dp_mesh = self.device_mesh["dp"]
                 self.tp_rank = self.tp_mesh.get_local_rank()
                 
                 print_rank0(f'Using an effective DDP size: {self.effective_dp_size}')
         else:
             self.DDP_enabled = False
             self.TP_enabled = False
-            self.effective_batches = 1
+            self.effective_dp_size = 1
             self.tp_size = 1
             self.tp_mesh = None
+            self.dp_group= None
 
         # Evaluation-only mode
         if eval_only:
@@ -151,7 +161,7 @@ class FourierNeuralOperator:
         self.trainLoader, self.valLoader, self.dataset, self.train_sampler, self.val_sampler = getDataLoaders(
                                                                         **self.data_config,
                                                                          kX=model['kX'], kY=model['kY'], 
-                                                                         kZ=model['kZ'], dp_size=self.effective_batches,
+                                                                         kZ=model['kZ'], dp_size=self.effective_dp_size,
                                                                          tp_size=self.tp_size
                                                                         )
         self.outType = self.dataset.outType
@@ -211,7 +221,7 @@ class FourierNeuralOperator:
         if self.DDP_enabled:
             self.model = DDP(self.model, 
                              device_ids=[self.local_rank],
-                             process_group=None,  # default: init_process_group
+                             process_group=self.dp_group,  # default: init_process_group
                              broadcast_buffers=True
                             )
         torch.cuda.empty_cache()
@@ -304,7 +314,8 @@ class FourierNeuralOperator:
             # [nBatches=nPatch_per_sample, batchSize=nSamples/nBatches, channel, nX, ny]
             inp_list, out_list = next(data_iter)
             nBatches = len(inp_list)
-
+        
+        start_epoch_time = time.perf_counter()
         for iBatch in range(nBatches):
             # Batch
             with torch.autocast(device_type=self.autocast_device_type, dtype=torch.float16, enabled=self.use_amp):
@@ -329,6 +340,16 @@ class FourierNeuralOperator:
                 else:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
+
+                if iBatch == 0:
+                    forward_flops, backward_flops, total_flops = count_flops(
+                                                            model=model,
+                                                            x=inp,
+                                                            y=ref,
+                                                            loss_fn=self.lossFunction,
+                                                            device=self.device,
+                                                            dtp_group=None
+                                                        )
 
                 # Forward pass
                 if self.enable_profile:
@@ -449,38 +470,41 @@ class FourierNeuralOperator:
 
         scheduler_step(scheduler)
         avg_loss = total_loss / nBatches
+        end_epoch_time = time.perf_counter()
 
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"TrainEpoch_{self.epochs}_DDPLoss")
             # Obtain the global average loss.
-            if self.TP_enabled:
-                dp_group = self.effective_dp_mesh.get_group()
-            else:
-                dp_group = None
-            
             dist.all_reduce(avg_loss, 
                             op=dist.ReduceOp.AVG, 
-                            group=dp_group)
+                            group=self.dp_group)
             if self.enable_profile:
                 nvtx.range_pop()  # end ddploss
         
         train_loss = avg_loss.item()  # loss per gpu
         self.losses["model"]["train"] = train_loss
         self.gradientNormEpoch = gradsEpoch / nBatches
-        print_rank0(f"Train Epoch {self.epochs}: AvgLoss={train_loss:.4e} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
+        if self.dataClass == 'pic':
+            print_rank0(f"Train Epoch {self.epochs}: AvgLoss={train_loss:.4e} -- lr: {optimizer.param_groups[0]['lr']}\n")
+        else:
+            print_rank0(f"Train Epoch {self.epochs}: AvgLoss={train_loss:.4e} (id: {idLoss:>7f}) -- lr: {optimizer.param_groups[0]['lr']}\n")
 
         if self.benchmark:
-            print_rank0(f"CUDA Memory for Fwd Pass - Allocated: {mean(fwd_peak_mem):.2f} MB")
-            print_rank0(f"CUDA Memory for Fwd Pass - Reserved: {mean(fwd_reserv_mem):.2f} MB")
-            print_rank0(f"CUDA Memory for Bwd Pass - Allocated: {mean(bwd_peak_mem):.2f} MB")
-            print_rank0(f"CUDA Memory for Bwd Pass - Reserved: {mean(bwd_reserv_mem):.2f} MB")
-            print_rank0(f"Estimate Activations Memory: {mean(fwd_peak_mem)-mean(bwd_peak_mem):.2f} MB")
+            print_rank0(f"CUDA Memory for Fwd Pass - Allocated per Epoch: {mean(fwd_peak_mem):.2f} MB")
+            print_rank0(f"CUDA Memory for Fwd Pass - Reserved per Epoch: {mean(fwd_reserv_mem):.2f} MB")
+            print_rank0(f"CUDA Memory for Bwd Pass - Allocated per Epoch: {mean(bwd_peak_mem):.2f} MB")
+            print_rank0(f"CUDA Memory for Bwd Pass - Reserved per Epoch: {mean(bwd_reserv_mem):.2f} MB")
+            print_rank0(f"Estimate Activations Memory per Epoch: {mean(fwd_peak_mem)-mean(bwd_peak_mem):.2f} MB")  
 
         if self.enable_profile:
             if self.profiler_type == "torch":
                 self.profiler.stop()
             nvtx.range_pop() # end epoch
+
+        print_rank0(
+                f"Train Epoch {self.epochs} time [min]: {(end_epoch_time - start_epoch_time) / 60.0}, average TFLOPs = {total_flops * nBatches / (end_epoch_time - start_epoch_time) / 1e12}"
+            )
 
     def valid(self):
         model = self.model.eval()
@@ -573,26 +597,19 @@ class FourierNeuralOperator:
         if self.DDP_enabled:
             if self.enable_profile:
                 nvtx.range_push(f"ValEpoch_{self.epochs}_DDPLoss")
-            if self.TP_enabled:
-                dp_group = self.effective_dp_mesh.get_group()
-                effective_dp_size = self.effective_dp_size
-            else:
-                dp_group = None
-                effective_dp_size = self.world_size
             # Obtain the global average loss.
-            if self.TP_enabled:
-                dist.all_reduce(avg_loss, 
-                            op=dist.ReduceOp.AVG, 
-                            group=dp_group)
+            dist.all_reduce(avg_loss, 
+                        op=dist.ReduceOp.AVG, 
+                        group=self.dp_group)
             relative_error = relative_error.to(self.device)
             dist.all_reduce(relative_error,
                             op=dist.ReduceOp.AVG, 
-                            group=dp_group)
+                            group=self.dp_group)
             local_errors = local_errors.to(self.device)
-            out = torch.zeros(effective_dp_size * local_errors.numel(),
+            out = torch.zeros(self.effective_dp_size * local_errors.numel(),
                               device=local_errors.device,
                               dtype=local_errors.dtype)
-            dist.all_gather_into_tensor(out, local_errors, group=dp_group)
+            dist.all_gather_into_tensor(out, local_errors, group=self.dp_group)
             median_error = out.median().item()
             if self.enable_profile:
                 nvtx.range_pop() # end ddploss
@@ -602,7 +619,10 @@ class FourierNeuralOperator:
         val_loss = avg_loss.item() # loss per gpu
         val_error = relative_error.item()
         self.losses["model"]["valid"] = val_loss
-        print_rank0(f"Validation Epoch {self.epochs}: AvgLoss={val_loss:.4e} TestError={val_error:.2f}% MedianTestError={median_error:.4f}% (id: {idLoss:>7f})\n")
+        if self.dataClass == 'pic':
+            print_rank0(f"Validation Epoch {self.epochs}: AvgLoss={val_loss:.4e} TestError={val_error:.2f}% MedianTestError={median_error:.4f}\n")
+        else:
+            print_rank0(f"Validation Epoch {self.epochs}: AvgLoss={val_loss:.4e} (id: {idLoss:>7f})\n")
 
     def learn(self, nEpoch, save_interval=100):
         self.epochs += 1
