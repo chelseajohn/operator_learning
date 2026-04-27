@@ -98,6 +98,8 @@ def main(args):
         torch.distributed.destroy_process_group()
 
 if __name__ == "__main__":
+    import warnings
+    warnings.filterwarnings("ignore")   
     seed = 152
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -105,8 +107,11 @@ if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    enable_tf32_only_on_a100()
-
+    # enable_tf32_only_on_a100()
+    torch.set_float32_matmul_precision("high")  # Enable TF32 matmul
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
     if args.compile_train == 1:
         mp.set_start_method("spawn", force=True)
         mp.freeze_support()

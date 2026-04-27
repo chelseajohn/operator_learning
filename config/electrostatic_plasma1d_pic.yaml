@@ -20,6 +20,7 @@ data:
   batchSize: 20        # Train Global Batch size
   val_batchSize: 1     # validation local Batch size 
   sampling_mode: None  # [fixed, ordered, random]
+  gas: 1               # gradient accumulation steps
  
 model:
   da: 1

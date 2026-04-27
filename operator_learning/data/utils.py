@@ -83,6 +83,7 @@ def getDataLoaders(dataFile,
         return dataset
 
     val_batchSize = kwargs.get('val_batchSize', None)  # local batch size
+    gas = kwargs.get('accum_steps', 1)
     dataset.printInfos()
     
     if (sampling_mode == 'random' and not pad_to_fullGrid) or \
@@ -109,12 +110,12 @@ def getDataLoaders(dataFile,
             dataset, [trainSize, valSize], generator=generator)
 
     if torch.distributed.is_initialized():
-        local_batchSize = batchSize // dp_size
+        local_batchSize = batchSize // (dp_size * gas)
         dp_rank = get_rank() // tp_size
         train_sampler = DistributedSampler(trainSet, num_replicas=dp_size, rank=dp_rank, shuffle=True)
         val_sampler = DistributedSampler(valSet, num_replicas=dp_size, rank=dp_rank, shuffle=False)
     else:
-        local_batchSize = batchSize
+        local_batchSize = batchSize // gas
         train_sampler = None
         val_sampler = None
 
@@ -126,10 +127,9 @@ def getDataLoaders(dataFile,
         train_batchSize = local_batchSize
         valid_batchSize = val_batchSize  if val_batchSize is not None else local_batchSize 
 
-    print_rank0(f'Using GlobalBatchSize: {batchSize}, train localBatchSize: {train_batchSize}, validation localBatchSize: {valid_batchSize}')
+    print_rank0(f'Using GlobalBatchSize: {batchSize}, Gradient accumulation steps: {gas}, train localBatchSize: {train_batchSize}, validation localBatchSize: {valid_batchSize}')
     trainLoader = DataLoader(trainSet, batch_size=train_batchSize, sampler=train_sampler, shuffle=(train_sampler is None), 
-                             num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True,
-                             drop_last=True)
+                             num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
     valLoader = DataLoader(valSet, batch_size=valid_batchSize, sampler=val_sampler, shuffle=False, num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
 
     return trainLoader, valLoader, dataset, train_sampler, val_sampler

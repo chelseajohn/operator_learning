@@ -156,14 +156,17 @@ class FourierNeuralOperator:
         self.data_config.pop("outScaling", 1.0)
         self.use_domain_sampling = True if self.data_config['sampling_mode'] is not None else False  # only for RBC 2D
         self.dataClass = data['dataClass']
+        self.accum_steps = self.data_config.pop("gas", 1)
+
 
         # sample RBC: [batchSize, channel, nX, nY, (nZ)], sample PIC: [batchSize, channel, dim]
         self.trainLoader, self.valLoader, self.dataset, self.train_sampler, self.val_sampler = getDataLoaders(
                                                                         **self.data_config,
                                                                          kX=model['kX'], kY=model['kY'], 
                                                                          kZ=model['kZ'], dp_size=self.effective_dp_size,
-                                                                         tp_size=self.tp_size
+                                                                         tp_size=self.tp_size, accum_steps=self.accum_steps
                                                                         )
+        print_rank0(f"Using gradient accumulation in steps of {self.accum_steps} with local batchsize {self.trainLoader.batch_size}")
         self.outType = self.dataset.outType
         self.outScaling = self.dataset.outScaling
 
@@ -316,6 +319,7 @@ class FourierNeuralOperator:
             nBatches = len(inp_list)
         
         start_epoch_time = time.perf_counter()
+        optimizer.zero_grad()
         for iBatch in range(nBatches):
             # Batch
             with torch.autocast(device_type=self.autocast_device_type, dtype=torch.float16, enabled=self.use_amp):
@@ -383,8 +387,6 @@ class FourierNeuralOperator:
                 if self.enable_profile:
                     nvtx.range_pop() # end loss
            
-            optimizer.zero_grad()
-
             if self.benchmark and iBatch % 10 == 0:
                 allocated = torch.cuda.memory_allocated() / (1024 ** 2)  # MB
                 reserved = torch.cuda.memory_reserved() / (1024 ** 2)    # MB
@@ -424,7 +426,8 @@ class FourierNeuralOperator:
             # Optimizer
             if self.enable_profile:
                 nvtx.range_push("optimizer_step")
-            optimizer_step(self.scaler, optimizer)
+            if (iBatch+1) % self.accum_steps == 0:
+                optimizer_step(self.scaler, optimizer)
             if self.enable_profile:
                 nvtx.range_pop() # end optimizer
 
@@ -459,6 +462,8 @@ class FourierNeuralOperator:
             grads = torch.cat([p.grad.flatten() for p in model.parameters() if p.grad is not None])
             grad_norm = grads.norm()
             gradsEpoch += grad_norm
+            if (iBatch+1) % self.accum_steps == 0:
+                optimizer.zero_grad()
 
             if self.USE_TENSORBOARD:
                 self.writer.add_scalar("Gradients/Norm", grad_norm,iBatch)

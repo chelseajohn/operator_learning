@@ -207,7 +207,7 @@ def count_flops(
     """
     Count floating point operations [TFLOP] in forward and backward pass of the model.
 
-    FLOPs are accumulated over the entire group
+    FLOPs are accumulated over the entire distributed group
     """
     x, y = x.to(device), y.to(device)
     with FlopCounterMode(
