@@ -5,7 +5,7 @@ from torch.utils.flop_counter import FlopCounterMode
 from configmypy import Bunch
 import opt_einsum
 import unicodedata
-import re
+import re, os, platform
 
 def readConfig(config):
     """
@@ -45,7 +45,9 @@ def print_rank0(message):
         if dist.get_rank() == 0:
             print(message, flush=True)
     else:
-        print(message, flush=True)
+        master_node_name = os.environ.get('MASTER_ADDR').split(".")[0]
+        if platform.node() == master_node_name and int(os.environ.get("RANK")) == 0:
+            print(message, flush=True)
         
 @torch._dynamo.disable
 def einsum_complexhalf(eq, *args):
