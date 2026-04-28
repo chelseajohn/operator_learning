@@ -48,13 +48,31 @@ parser.add_argument(
 parser.add_argument(
     "--measure_power", type=int, default=0, help="use jpwr for power measurement during training [0:False, 1:True]")
 parser.add_argument(
+    "--batchSize", type=int, help="training global batch size")
+parser.add_argument(
+    "--val_batchSize",type=int, help="validation local batch size")
+parser.add_argument(
+    "--gas", type=int, help="gradient accumulation steps")
+parser.add_argument(
+    "--tp_size", type=int, help="input sharding")
+parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
+
 args = parser.parse_args()
 
 config = readConfig(args.config)
 if "train" in config:
-    print_rank0(f'Overwriting args with config values..')
+    print_rank0(f'Overwriting train args with config values..')
     args.__dict__.update(**config.train)
+
+for key in ["batchSize", "val_batchSize", "gas"]:
+    val = getattr(args, key)
+    if val is not None:
+        print_rank0(f'Overwriting {key} with arg value..')
+        config.data[key] = val
+if args.tp_size is not None:
+    print_rank0(f'Overwriting tp_size with arg value..')
+    config.parallel_strategy['tp_size'] = args.tp_size
 
 sections = ["data", "model", "optim", "lr_scheduler", "parallel_strategy", "loss"]
 for name in sections:
