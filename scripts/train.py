@@ -48,13 +48,31 @@ parser.add_argument(
 parser.add_argument(
     "--measure_power", type=int, default=0, help="use jpwr for power measurement during training [0:False, 1:True]")
 parser.add_argument(
+    "--batchSize", type=int, help="training global batch size")
+parser.add_argument(
+    "--val_batchSize",type=int, help="validation local batch size")
+parser.add_argument(
+    "--gas", type=int, help="gradient accumulation steps")
+parser.add_argument(
+    "--tp_size", type=int, help="input sharding")
+parser.add_argument(
     "--config", default="config.yaml", help="configuration file")
+
 args = parser.parse_args()
 
 config = readConfig(args.config)
 if "train" in config:
-    print_rank0(f'Overwriting args with config values..')
+    print_rank0(f'Overwriting train args with config values..')
     args.__dict__.update(**config.train)
+
+for key in ["batchSize", "val_batchSize", "gas"]:
+    val = getattr(args, key)
+    if val is not None:
+        print_rank0(f'Overwriting {key} with arg value..')
+        config.data[key] = val
+if args.tp_size is not None:
+    print_rank0(f'Overwriting tp_size with arg value..')
+    config.parallel_strategy['tp_size'] = args.tp_size
 
 sections = ["data", "model", "optim", "lr_scheduler", "parallel_strategy", "loss"]
 for name in sections:
@@ -98,6 +116,8 @@ def main(args):
         torch.distributed.destroy_process_group()
 
 if __name__ == "__main__":
+    import warnings
+    warnings.filterwarnings("ignore")   
     seed = 152
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -105,8 +125,11 @@ if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    enable_tf32_only_on_a100()
-
+    # enable_tf32_only_on_a100()
+    torch.set_float32_matmul_precision("high")  # Enable TF32 matmul
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
     if args.compile_train == 1:
         mp.set_start_method("spawn", force=True)
         mp.freeze_support()
