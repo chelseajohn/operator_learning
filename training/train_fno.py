@@ -367,7 +367,7 @@ class FourierNeuralOperator:
 
                 if self.enable_profile:
                     nvtx.range_push("loss")
-                loss = self.lossFunction(pred, ref)
+                loss = self.lossFunction(pred, ref)/self.accum_steps
                 if self.TP_enabled:
                     # All-reduce for logging (detached, outside graph)
                     local_loss = loss.detach()
