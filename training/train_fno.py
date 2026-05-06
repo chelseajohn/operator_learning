@@ -224,7 +224,7 @@ class FourierNeuralOperator:
         if self.DDP_enabled:
             self.model = DDP(self.model, 
                              device_ids=[self.local_rank],
-                             process_group=self.dp_group,  # default: init_process_group
+                             process_group=None,  # default: init_process_group
                              broadcast_buffers=True
                             )
         torch.cuda.empty_cache()
