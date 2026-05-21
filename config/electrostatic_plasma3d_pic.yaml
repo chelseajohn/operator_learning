@@ -78,7 +78,7 @@ eval:
   runId: 1
   imgExt: png
   evalDir: eval3D_PIF_5_miniapps
-  dim: 2
+  dim: 3
   kc : 0.21
   NG : 32
   T: 60.0

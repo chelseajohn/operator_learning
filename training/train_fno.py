@@ -821,7 +821,7 @@ class FourierNeuralOperator:
             map_location = {f'cuda:0': f'{self.device}'}
         else:
             map_location = self.device
-        checkpoint = torch.load(self.fullPath(filename), map_location=map_location)
+        checkpoint = torch.load(self.fullPath(filename), map_location=map_location, weights_only=False)
 
         if hasattr(self, "modelConfig") and self.modelConfig != checkpoint['model']:
             for key, value in self.modelConfig.items():
