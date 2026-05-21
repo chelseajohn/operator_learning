@@ -45,9 +45,15 @@ def print_rank0(message):
         if dist.get_rank() == 0:
             print(message, flush=True)
     else:
-        master_node_name = os.environ.get('MASTER_ADDR').split(".")[0]
-        if platform.node() == master_node_name and int(os.environ.get("RANK")) == 0:
-            print(message, flush=True)
+        master_addr = os.environ.get("MASTER_ADDR")
+        rank = int(os.environ.get("RANK", 0))
+        if rank == 0:
+            if master_addr is None:
+                print(message, flush=True)
+            else:
+                master_node_name = master_addr.split(".")[0]
+                if platform.node() == master_node_name:
+                    print(message, flush=True)
         
 @torch._dynamo.disable
 def einsum_complexhalf(eq, *args):
