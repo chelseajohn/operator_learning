@@ -3,6 +3,7 @@
 import os
 import sys
 from pathlib import Path
+from textwrap import dedent
 base_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(base_path))
 
@@ -126,15 +127,16 @@ for tc in config["testCases"]:
         landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=args.testCase)
     elif ((args.testCase == "tsi") or (args.testCase == "bti")):
         growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=args.testCase)
-
-    HEADER = """
+    
+    HEADER = dedent("""
     # FNO evaluation for PIC in {dim}D on {device}
+
     ## Simulation Configuration
 
-    | Parameter    | Value   |
-    |--------------|---------|
+    | Parameter | Value |
+    |-----------|-------|
     {rows}
-    """
+    """)
 
     # Convert dict into Markdown table rows
     rows = "\n".join([f"| {k:<12} | {v} |" for k, v in args.__dict__.items()])
