@@ -78,16 +78,38 @@ eval:
   imgExt: png
   evalDir: eval2D_PIF_5_miniapps
   dim: 2
-  kc : 0.21
   NG : 32
-  T: 60.0
-  dt: 0.05
   Vt: 1
   nParticle: 100000
   Qm : -1
-  alpha: 0.01
-  testCase: bti
   ref: pif
+
+testCases:
+  bti: 
+    T: 60
+    dt: 0.05
+    kc: 0.21
+    alpha: 0.01
+  tsi:
+    T: 60
+    dt: 0.05
+    kc: 0.5
+    alpha: 0.01
+  weakLandau:
+    T: 60
+    dt: 0.05
+    kc: 0.5
+    alpha: 0.05
+  strongLandau:
+    T: 60
+    dt: 0.05
+    kc: 0.5
+    alpha: 0.5
+  cyclotron:
+    T: 12
+    dt: 0.01
+    kc: 0.5
+    alpha: 0.01
   
 profile:
   enableProfiler: false
