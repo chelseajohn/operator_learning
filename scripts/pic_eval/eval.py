@@ -81,7 +81,7 @@ torch.cuda.manual_seed_all(seed)
 for tc in config["testCases"]:
     args.__dict__.update(**config["testCases"][tc])
     args.evalDir = f"{config.eval.evalDir}/{tc}"
-    testCase = tc
+    args.testCase = tc
     vis = PICVisualizer(args)
 
     if checkpoint is not None:
@@ -122,10 +122,10 @@ for tc in config["testCases"]:
 
     energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EpRef=EpRef, EkPred=EkPred, EpPred=EpPred)
     conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
-    if ((testCase == "weakLandau") or (testCase == "strongLandau")):
-        landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=testCase)
-    elif ((testCase == "tsi") or (testCase == "bti")):
-        growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=testCase)
+    if ((args.testCase == "weakLandau") or (args.testCase == "strongLandau")):
+        landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=args.testCase)
+    elif ((args.testCase == "tsi") or (args.testCase == "bti")):
+        growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=args.testCase)
 
     HEADER = """
     # FNO evaluation for PIC in {dim}D on {device}
