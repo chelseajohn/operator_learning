@@ -46,6 +46,9 @@ parser.add_argument(
     "--compile_mode", type=str, default="default", 
     help="compile options ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']")
 parser.add_argument(
+    "--model_dtype", type=str, default="float32", 
+    help="Model dtype for layers except FNO_DSE layer kept in float64, options['float32', 'float64'] ")
+parser.add_argument(
     "--measure_power", type=int, default=0, help="use jpwr for power measurement during training [0:False, 1:True]")
 parser.add_argument(
     "--batchSize", type=int, help="training global batch size")
@@ -93,6 +96,10 @@ def main(args):
     use_complex_amp = True if args.use_complex_amp == 1 else False
     compile = True if args.compile_train == 1 else False
     compile_mode = args.compile_mode
+    if args.model_dtype == 'float32':
+        model_dtype = torch.float32
+    else:
+        model_dtype = torch.float64
 
     if benchmark:
         print_rank0('Running FNO training for benchmarking...')
@@ -107,9 +114,9 @@ def main(args):
     if measure_power:
         print_rank0('Measuring power usage during training using jpwr..')
 
-    model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False,\
+    model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=True,\
                                 benchmark=benchmark, use_amp=use_amp, use_complex_amp=use_complex_amp, \
-                                compile=compile, compile_mode=compile_mode)
+                                compile=compile, compile_mode=compile_mode, model_dtype=model_dtype)
     model.learn(args.epochs, args.saveInterval)
 
     if torch.distributed.is_initialized():

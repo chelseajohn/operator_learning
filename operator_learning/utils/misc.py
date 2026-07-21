@@ -210,7 +210,8 @@ def count_flops(
     y: torch.tensor,
     loss_fn: callable,
     device: torch.device,
-    dtp_group: dist.ProcessGroup
+    dtp_group: dist.ProcessGroup,
+    ddp_enabled: bool
 ):
     """
     Count floating point operations [TFLOP] in forward and backward pass of the model.
@@ -224,7 +225,8 @@ def count_flops(
             pred = model(x)
 
     forward_flops = torch.tensor(flop_counter.get_total_flops(), device=device)
-    dist.all_reduce(forward_flops, group=dtp_group)
+    if ddp_enabled:
+        dist.all_reduce(forward_flops, group=dtp_group)
 
     with FlopCounterMode(
         display=False
@@ -233,7 +235,8 @@ def count_flops(
         loss.backward()
 
     backward_flops = torch.tensor(flop_counter.get_total_flops(), device=device)
-    dist.all_reduce(backward_flops, group=dtp_group)
+    if ddp_enabled:
+        dist.all_reduce(backward_flops, group=dtp_group)
 
     with FlopCounterMode(
         display=False
@@ -243,7 +246,8 @@ def count_flops(
         loss.backward()
 
     total_flops = torch.tensor(flop_counter.get_total_flops(), device=device)
-    dist.all_reduce(total_flops, group=dtp_group)
+    if ddp_enabled:
+        dist.all_reduce(total_flops, group=dtp_group)
 
     # if dist.get_rank(group=dtp_group) == 0:
     #     print(f"Forward flops per iteration is {forward_flops / 1e12} TFLOP")
@@ -253,3 +257,37 @@ def count_flops(
     #     )
 
     return forward_flops, backward_flops, total_flops
+
+
+def _dump_tensor(name, t, log_dir="./debug_logs"):
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    os.makedirs(log_dir, exist_ok=True)
+    path = os.path.join(
+        log_dir,
+        f"rank{rank}_{name}.pt"
+    )
+    torch.save(t.detach().cpu(), path)
+
+def clone_state_dict(model):
+    return {
+        name: p.detach().cpu().clone()
+        for name, p in model.named_parameters()
+    }
+
+def clone_grads(model):
+    grads = {}
+    for name, p in model.named_parameters():
+        if p.grad is None:
+            grads[name] = None
+        else:
+            grads[name] = p.grad.detach().cpu().clone()
+    return grads
+
+class ContiguousGrad(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad.contiguous()

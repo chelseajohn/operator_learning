@@ -130,6 +130,7 @@ def getDataLoaders(dataFile,
     print_rank0(f'Using GlobalBatchSize: {batchSize}, Gradient accumulation steps: {gas}, train localBatchSize: {train_batchSize}, validation localBatchSize: {valid_batchSize}')
     trainLoader = DataLoader(trainSet, batch_size=train_batchSize, sampler=train_sampler, shuffle=(train_sampler is None), 
                              num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
-    valLoader = DataLoader(valSet, batch_size=valid_batchSize, sampler=val_sampler, shuffle=False, num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
+    valLoader = DataLoader(valSet, batch_size=valid_batchSize, sampler=val_sampler, shuffle=False, 
+                            num_workers=num_workers, persistent_workers=True, collate_fn=collate_fn, pin_memory=True)
 
     return trainLoader, valLoader, dataset, train_sampler, val_sampler

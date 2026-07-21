@@ -5,15 +5,21 @@ class VandermondeTransformMatrixFree:
     """
     Matrix-free 1D/2D/3D Fourier transforms on a nonequispaced lattice.
     """
-    def __init__(self, x_positions, kX, y_positions=None, kY=None,
-                 z_positions=None, kZ=None, dim=1, device='cuda', dtype=torch.float32):
+    def __init__(self, x_positions, kX, x_pos_min=None, x_pos_max=None, 
+                 y_positions=None, kY=None, y_pos_min=None, y_pos_max=None,
+                 z_positions=None, kZ=None, z_pos_min=None, z_pos_max=None,
+                 dim=1, device='cuda', dtype=torch.float64):
         self.device = device
         self.dtype = dtype
         assert dim in (1, 2, 3), "dim must be 1 or 2 or 3"
         self.dim = dim
         self.kX = kX
-        x_positions = x_positions - torch.min(x_positions)
-        self.x_positions = x_positions * 6.28 / torch.max(x_positions)
+        if x_pos_min is None:
+            x_pos_min = torch.min(x_positions) 
+        if x_pos_max is None:
+            x_pos_max = torch.max(x_positions)
+        x_positions = x_positions - x_pos_min              
+        self.x_positions = x_positions * 6.28 /  x_pos_max 
         self.X_ = torch.cat((torch.arange(self.kX, dtype=dtype, device=device), 
                              torch.arange(start=-(self.kX), end=0, dtype=dtype, device=device)), 
                              0)
@@ -22,20 +28,28 @@ class VandermondeTransformMatrixFree:
         self.Fx = torch.exp(-1j * self.X_[None, :, None] * self.x_positions[:, None, :]) #(batchsize, 2*kX, nParticle)
 
         if dim > 1:  
+            if y_pos_min is None:
+                y_pos_min = torch.min(y_positions) 
+            if y_pos_max is None:
+                y_pos_max = torch.max(y_positions)
             self.kY = kY if kY is not None else kX
             self.Y_ = torch.cat((torch.arange(self.kY, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kY), end=0, dtype=dtype, device=device)),
                                  0)
-            y_positions = y_positions - torch.min(y_positions)
-            self.y_positions = y_positions * 6.28 / torch.max(y_positions)
+            y_positions = y_positions - y_pos_min              
+            self.y_positions = y_positions * 6.28 /y_pos_max  
             self.Fy = torch.exp(-1j * self.Y_[None, :, None] * self.y_positions[:, None, :]) #(batchsize, 2*kY, nParticle)
         if dim > 2:
+            if z_pos_min is None:
+                z_pos_min = torch.min(z_positions) 
+            if z_pos_max is None:
+                z_pos_max = torch.max(z_positions)
             self.kZ = kZ if kZ is not None else kX
             self.Z_ = torch.cat((torch.arange(self.kZ, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kZ), end=0, dtype=dtype, device=device)),
                                  0)
-            z_positions = z_positions - torch.min(z_positions)
-            self.z_positions = z_positions * 6.28 / torch.max(z_positions)
+            z_positions = z_positions - z_pos_min                          
+            self.z_positions = z_positions * 6.28 / z_pos_max             
             self.Fz = torch.exp(-1j * self.Z_[None, :, None] * self.z_positions[:, None, :]) #(batchsize, 2*kZ, nParticle)
 
 
@@ -65,7 +79,8 @@ class VandermondeTransformMatrixFree:
     
         out = torch.einsum("bcp,bkp,blp->bckl", data, self.Fx, self.Fy)
         out = out.reshape(self.batch_size, data.shape[1], len(self.X_)*len(self.Y_))
-
+        # print(f'data: {data.dtype}, Fx: {self.Fx.dtype}, Fy: {self.Fy.dtype}, FWD out: {out.dtype}', flush=True)
+       
         return out 
     
     def _inverse_2d(self, data):
@@ -75,6 +90,7 @@ class VandermondeTransformMatrixFree:
         """
         d = data.reshape(self.batch_size, data.shape[1], len(self.X_), len(self.Y_))
         out = torch.einsum("bckl,bkp,blp->bcp", d, torch.conj(self.Fx), torch.conj(self.Fy)) 
+        # print(f'BWD out: {out.dtype}, data: {data.dtype}, Fx: {self.Fx.dtype}, Fy: {self.Fy.dtype}', flush=True)
 
         return out
     
