@@ -133,9 +133,11 @@ class FNO(nn.Module):
 
         self.dataClass = dataClass
         self.dataset = dataset if dataClass == 'rbc' else None
-        self.data_type = torch.float16 if use_complex_amp and self.training else dtype
+        self.data_type = torch.float16 if use_complex_amp and self.training else dtype  # For P & Q layers
         self.tp_mesh = kwargs.get("tp_mesh", None)
         self.matrix_free = matrix_free
+        self.fno_dtype = torch.float32 if use_dse else self.data_type
+        print_rank0(f"Using {self.data_type} for P and Q layers and {self.fno_dtype} for DSE Layer")
 
         if use_dse:
             self.layers = nn.ModuleList(
@@ -146,7 +148,7 @@ class FNO(nn.Module):
                           dim=n_dims,
                           use_complex_amp=use_complex_amp,
                           tp_mesh=self.tp_mesh,
-                          dtype=torch.float64,  # FP64 necessary for input sharding
+                          dtype=self.fno_dtype,  # FP64 necessary for input sharding
                          )
                  for _ in range(n_layers)])
         # elif use_toeplitz:
@@ -220,14 +222,14 @@ class FNO(nn.Module):
                                                        x_pos_max=x_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=torch.float64
+                                                       dtype=self.fno_dtype
                                                         )
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                        kX=self.kX, 
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=torch.float64)
+                                                       dtype=self.fno_dtype)
             elif self.n_dims == 2:
                 if self.matrix_free:
                     transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
@@ -240,7 +242,7 @@ class FNO(nn.Module):
                                                        y_pos_max=y_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=torch.float64)
+                                                       dtype=self.fno_dtype)
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                         y_positions=x[:,1,:],
@@ -248,7 +250,7 @@ class FNO(nn.Module):
                                                         kY=self.kY,
                                                         dim=self.n_dims,
                                                         device=self.device,
-                                                        dtype=torch.float64)
+                                                        dtype=self.fno_dtype)
             else:
                 if self.matrix_free:
                     transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
@@ -265,7 +267,7 @@ class FNO(nn.Module):
                                                        z_pos_max=z_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=torch.float64)
+                                                       dtype=self.fno_dtype)
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                         y_positions=x[:,1,:],
@@ -275,7 +277,7 @@ class FNO(nn.Module):
                                                         kZ=self.kZ,
                                                         dim=self.n_dims,
                                                         device=self.device,
-                                                        dtype=torch.float64)
+                                                        dtype=self.fno_dtype)
                 
 
         # if self.use_toeplitz:

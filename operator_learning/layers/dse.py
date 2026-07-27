@@ -17,7 +17,7 @@ from operator_learning.utils.misc import (
 
 class SpectralConv_dse(nn.Module):
     def __init__(self, dv, kX, kY=None, kZ=None, dataClass='pic', bias=False, 
-                 dim=1, use_complex_amp=False, tp_mesh=None, dtype=torch.complex128):
+                 dim=1, use_complex_amp=False, tp_mesh=None, dtype=torch.complex64):
         
         """
         Spectral weights R and Bias must be kept in Float64 when particle 
@@ -32,6 +32,7 @@ class SpectralConv_dse(nn.Module):
         self.channel = dv
         self.use_complex_amp = use_complex_amp
         self.data_type = dtype
+        self.bias_dtype = torch.float32 if dtype == torch.complex64 else torch.float64
         self.scale = 1 / (dv * dv)
         self.tp_mesh = tp_mesh
         if self.tp_mesh is not None:
@@ -53,7 +54,7 @@ class SpectralConv_dse(nn.Module):
             init_std = (2/(dv * dim))**0.5
             self.bias = nn.Parameter(
                 init_std * torch.randn(*(tuple([dv]) + (1,)))
-            ).to(torch.float64)
+            ).to(self.bias_dtype)  
         else:
             self.bias = None
         
@@ -73,7 +74,7 @@ class SpectralConv_dse(nn.Module):
             R = deformat_complexTensor(weights.half()).to(input.device)  # complex32
         else:
             einsum_fn = torch.einsum
-            R = deformat_complexTensor(weights).to(input.device) # complex128
+            R = deformat_complexTensor(weights).to(input.device) # complex64/complex128
 
         if self.dim == 1:
             return einsum_fn("bik,iok->bok", input, R)
@@ -101,7 +102,7 @@ class SpectralConv_dse(nn.Module):
         # Transform to fourier space
         # Fourier coeffs (complex)
         x_ft = transform.forward(x.to(dtype))  # [batchsize, dv, modes]
-        x_ft = x_ft.contiguous()
+        # x_ft = x_ft.contiguous()
 
 
         # print(f'x_ft: {x_ft.dtype}', flush=True)
@@ -109,11 +110,11 @@ class SpectralConv_dse(nn.Module):
 
 
         if self.tp_size > 1:
-            # torch.distributed.all_reduce(x_ft, group=self.tp_mesh.get_group())
-            x_ft = torch.distributed.nn.functional.all_reduce(x_ft.contiguous(), 
-                                                    op=torch.distributed.ReduceOp.SUM,
-                                                    group=self.tp_mesh.get_group())
-            x_ft =  ContiguousGrad.apply(x_ft)
+            torch.distributed.all_reduce(x_ft, group=self.tp_mesh.get_group())
+            # x_ft = torch.distributed.nn.functional.all_reduce(x_ft.contiguous(), 
+            #                                         op=torch.distributed.ReduceOp.SUM,
+            #                                         group=self.tp_mesh.get_group())
+            # x_ft =  ContiguousGrad.apply(x_ft)
 
             # print(f'x_ft_after: {x_ft.dtype}', flush=True)
             # _dump_tensor("x_ft_after", x_ft)
@@ -159,7 +160,7 @@ class DSELayer(nn.Module):
                  dim=1,
                  use_complex_amp=False,
                  tp_mesh=None,
-                 dtype=torch.float64
+                 dtype=torch.float32
                  ):
         super().__init__()
 
@@ -170,12 +171,13 @@ class DSELayer(nn.Module):
             self.sigma = nn.ReLU(inplace=True)
         
         self.tp_mesh = tp_mesh
+        self.spectral_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
         self.conv = SpectralConv_dse(dv=dv, kX=kX, kY=kY, kZ=kZ, 
                                     dataClass=dataClass,
                                     bias=bias, dim=dim,
                                     use_complex_amp=use_complex_amp,
                                     tp_mesh=tp_mesh,
-                                    dtype=torch.complex128)
+                                    dtype=self.spectral_dtype)  
     
         # self.W = GridLinear(
         #                inSize=dv, outSize=dv, hiddenSize=None,

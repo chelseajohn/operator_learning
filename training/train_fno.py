@@ -549,6 +549,16 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
+                    dim = data[0].shape[1]
+                    x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
+                    if dim > 1:
+                        y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
+                    else:
+                        y_pos_min, y_pos_max = None, None
+                    if dim > 2:
+                        z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
+                    else:
+                        z_pos_min, z_pos_max = None, None
                 if self.dataClass == 'pic':
                     # sharding particles across tp ranks
                     if self.TP_enabled:
@@ -567,7 +577,11 @@ class FourierNeuralOperator:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
 
-                pred = model(inp)
+                pred = model(inp,
+                            x_pos_min=x_pos_min, x_pos_max=x_pos_max,
+                            y_pos_min=y_pos_min, y_pos_max=y_pos_max, 
+                            z_pos_min=z_pos_min, z_pos_max=z_pos_max
+                            )
                 local_loss = self.lossFunction(pred,ref)
                 error_nr = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))
                 error_dr = torch.mean(torch.abs(ref.flatten(start_dim=1)))

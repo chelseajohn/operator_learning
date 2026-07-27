@@ -8,7 +8,7 @@ class VandermondeTransformMatrixFree:
     def __init__(self, x_positions, kX, x_pos_min=None, x_pos_max=None, 
                  y_positions=None, kY=None, y_pos_min=None, y_pos_max=None,
                  z_positions=None, kZ=None, z_pos_min=None, z_pos_max=None,
-                 dim=1, device='cuda', dtype=torch.float64):
+                 dim=1, device='cuda', dtype=torch.float32):
         self.device = device
         self.dtype = dtype
         assert dim in (1, 2, 3), "dim must be 1 or 2 or 3"

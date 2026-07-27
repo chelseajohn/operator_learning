@@ -55,6 +55,9 @@ parser.add_argument(
 parser.add_argument(
     "--ref", default="pic", help="Choose the reference numerical scheme pic or pif")
 parser.add_argument(
+    "--model_dtype", type=str, default="float32", 
+    help="Model dtype for layers except FNO_DSE layer kept in float64, options['float32', 'float64'] ")
+parser.add_argument(
     "--config", default=None, help="configuration file")
 args = parser.parse_args()
 
@@ -67,7 +70,10 @@ if args.config is not None:
         args.checkpoint = config.train.checkpoint
         if "trainDir" in config.train:
             FourierNeuralOperator.TRAIN_DIR = config.train.trainDir
-    
+if args.model_dtype == 'float32':
+    model_dtype = torch.float32
+else:
+    model_dtype = torch.float64
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device_name = torch.cuda.get_device_name(0) if device == 'cuda' else 'CPU'
 checkpoint = args.checkpoint
@@ -86,7 +92,7 @@ for tc in config["testCases"]:
     vis = PICVisualizer(args)
 
     if checkpoint is not None:
-        fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic')
+        fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic', model_dtype=model_dtype)
         posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, EzpPred, timePred = vis.picND(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
         phase_spacePred = None
 

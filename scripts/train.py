@@ -114,7 +114,7 @@ def main(args):
     if measure_power:
         print_rank0('Measuring power usage during training using jpwr..')
 
-    model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=True,\
+    model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False,\
                                 benchmark=benchmark, use_amp=use_amp, use_complex_amp=use_complex_amp, \
                                 compile=compile, compile_mode=compile_mode, model_dtype=model_dtype)
     model.learn(args.epochs, args.saveInterval)
