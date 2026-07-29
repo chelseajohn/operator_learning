@@ -40,7 +40,8 @@ class FourierNeuralOperator:
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
                 loss:dict=None, profile:dict=None, checkpoint=None,
                 eval_only=False, debug=False, device=None, benchmark=False, use_complex_amp=False,
-                use_amp=False, compile=False, compile_mode='default', data_class='pic', model_dtype=torch.float32):
+                use_amp=False, compile=False, compile_mode='default', data_class='pic', 
+                model_dtype=torch.float32, fno_dtype=torch.float32):
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -50,7 +51,8 @@ class FourierNeuralOperator:
         self.world_size = int(os.getenv('WORLD_SIZE', '1'))
         self.debug = debug
         self.benchmark = benchmark
-        self.model_dtype = model_dtype   # FNO_DSE layer is kept in float64, choose float32 or float64 for other layers
+        self.fno_dtype = fno_dtype
+        self.model_dtype = model_dtype   # FNO_DSE layer is kept in fno_dtype choose float32 or float64 for other layers
         self.use_amp = use_amp
         self.use_complex_amp = use_complex_amp  # explicit casting to Float16 for complex numbers
         assert not (use_complex_amp and not use_amp), "use_complex_amp=True requires use_amp=True"
@@ -217,9 +219,10 @@ class FourierNeuralOperator:
     # Setup and utility methods
     # -------------------------------------------------------------------------
     def setupModel(self, model_config):
-        self.model = FNO(**model_config, dataset=self.dataset, dataClass=self.dataClass,\
+        self.model = FNO(**model_config, dataset=self.dataset, dataClass=self.dataClass,
                           use_complex_amp=self.use_complex_amp, device=self.device, 
-                          tp_mesh=self.tp_mesh, dtype=self.model_dtype).to(self.device)
+                          tp_mesh=self.tp_mesh, dtype=self.model_dtype, 
+                          fno_dtype=self.fno_dtype).to(self.device)
 
         # hooks = register_dtype_hooks(self.model)
         self.modelConfig = model_config.copy()

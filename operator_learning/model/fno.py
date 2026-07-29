@@ -109,6 +109,7 @@ class FNO(nn.Module):
                  matrix_free=False,
                  device='cpu',
                  dtype=torch.float32,
+                 fno_dtype=torch.float32,
                  **kwargs
                  ):
         
@@ -136,7 +137,7 @@ class FNO(nn.Module):
         self.data_type = torch.float16 if use_complex_amp and self.training else dtype  # For P & Q layers
         self.tp_mesh = kwargs.get("tp_mesh", None)
         self.matrix_free = matrix_free
-        self.fno_dtype = torch.float32 if use_dse else self.data_type
+        self.fno_dtype = fno_dtype
         print_rank0(f"Using {self.data_type} for P and Q layers and {self.fno_dtype} for DSE Layer")
 
         if use_dse:

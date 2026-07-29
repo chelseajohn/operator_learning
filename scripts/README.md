@@ -31,7 +31,8 @@ python train.py --config config.yaml --epochs 50 --trainDir results/
 - `--benchmark` : To get benchmark matrices
 - `--use_amp` : To use mixed precision training (Float32/Float16)
 - `--use_complex_amp` : To use explicit casting of torch.complex64 to torch.complex32
-- `--model_dtype` : To set the dtype for layers other than FNO Layer(float64) to either float32 or float64
+- `--model_dtype` : To set the dtype for layers other than FNO-DSE Layer to either float32 or float64 (default: `float32`)
+- `--fno_dtype` : To set the dtype for FNO-DSE Layer to either float32 or float64 (default: `float32`)
 - `--compile_train`: To compile `train()` with `torch.compile`
 - `--compile_mode` : `torch.compile` mode ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']
 - `--measure_power`: To measure power and energy during training on GPU using [jpwr](https://github.com/FZJ-JSC/jpwr)
@@ -101,6 +102,8 @@ OR
 - `--dim`: Dimension of the problem (default: 1)
 - `--alpha`: Pertubation (default: 0.5)
 - `--config`: Configuration file for evaluation parameters (default: None)  
+- `--model_dtype` : To set the dtype for layers other than FNO-DSE Layer to either float32 or float64 (default: `float32`)
+- `--fno_dtype` : To set the dtype for FNO-DSE Layer to either float32 or float64 (default: `float32`)
 
 
 # Benchmark

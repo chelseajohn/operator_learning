@@ -19,7 +19,7 @@ class VandermondeTransformMatrixFree:
         if x_pos_max is None:
             x_pos_max = torch.max(x_positions)
         x_positions = x_positions - x_pos_min              
-        self.x_positions = x_positions * 6.28 /  x_pos_max 
+        self.x_positions = x_positions * 2*torch.pi /  x_pos_max 
         self.X_ = torch.cat((torch.arange(self.kX, dtype=dtype, device=device), 
                              torch.arange(start=-(self.kX), end=0, dtype=dtype, device=device)), 
                              0)
@@ -37,7 +37,7 @@ class VandermondeTransformMatrixFree:
                                  torch.arange(start=-(self.kY), end=0, dtype=dtype, device=device)),
                                  0)
             y_positions = y_positions - y_pos_min              
-            self.y_positions = y_positions * 6.28 /y_pos_max  
+            self.y_positions = y_positions * 2*torch.pi /y_pos_max  
             self.Fy = torch.exp(-1j * self.Y_[None, :, None] * self.y_positions[:, None, :]) #(batchsize, 2*kY, nParticle)
         if dim > 2:
             if z_pos_min is None:
@@ -49,7 +49,7 @@ class VandermondeTransformMatrixFree:
                                  torch.arange(start=-(self.kZ), end=0, dtype=dtype, device=device)),
                                  0)
             z_positions = z_positions - z_pos_min                          
-            self.z_positions = z_positions * 6.28 / z_pos_max             
+            self.z_positions = z_positions * 2*torch.pi / z_pos_max             
             self.Fz = torch.exp(-1j * self.Z_[None, :, None] * self.z_positions[:, None, :]) #(batchsize, 2*kZ, nParticle)
 
 
