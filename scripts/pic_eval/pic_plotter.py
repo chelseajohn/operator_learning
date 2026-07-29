@@ -5,6 +5,7 @@ sys.path.append(str(base_path))
 import numpy as np
 import cupy as cp
 import time
+from tqdm import tqdm
 from scipy import sparse
 import matplotlib.pyplot as plt
 import h5py
@@ -76,14 +77,16 @@ class PICVisualizer:
             "font.size": 12,
             "axes.labelsize": 12,
             "axes.titlesize": 14,
-            "legend.fontsize": 8,
+            "legend.fontsize": 6,
+            "legend.loc": "best",
+            "legend.labelspacing": 0.3,
             "lines.linewidth": 2,
             "grid.alpha": 0.4,
             "grid.linestyle": "--"
         })
 
     def _img_path(self, name: str) -> Path:
-        filename = f"{name}_run{self.args.runId}.{self.args.imgExt}"
+        filename = f"{self.testCase}_{name}_run{self.args.runId}.{self.args.imgExt}"
         return filename
 
 
@@ -153,9 +156,8 @@ class PICVisualizer:
             T2 = None
 
 
-        for it in range(self.NT):
+        for it in tqdm(range(self.NT)):
            
-            print(it)
             if(self.testCase != 'cyclotron'):
                 #Apply periodic BCs 
                 xp = toPeriodicND(x=xp, L=self.Ln, dim=self.dim)

@@ -4,6 +4,7 @@ if os.getenv("ENABLE_FLOP_WRAPPERS", "0") == "1":
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from operator_learning.utils.misc import _dump_tensor
 
 class MLP(nn.Module):
     """
@@ -35,6 +36,7 @@ class MLP(nn.Module):
                  n_dims=2,
                  non_linearity=nn.GELU(),
                  dropout=0.0,
+                 dtype=torch.float32,
                  **kwargs):
         super().__init__()
 
@@ -49,6 +51,7 @@ class MLP(nn.Module):
         self.hidden_channels = in_channels if hidden_channels is None else hidden_channels
         self.dropout = dropout
         self.non_linearity = non_linearity
+        self.dtype = dtype
 
         self.layers = nn.ModuleList()
         self.dropouts = nn.ModuleList()
@@ -61,20 +64,22 @@ class MLP(nn.Module):
 
             if mode == 'conv':
                 Conv = nn.Conv2d if n_dims == 2 else nn.Conv3d
-                layer = Conv(in_ch, out_ch, kernel_size=1)
+                layer = Conv(in_ch, out_ch, kernel_size=1, bias=True)
 
             elif mode == 'channel':
-                layer = nn.Conv1d(in_ch, out_ch, kernel_size=1)
+                layer = nn.Conv1d(in_ch, out_ch, kernel_size=1, bias=True)
 
             elif mode == 'linear':
-                layer = nn.Linear(in_ch, out_ch)
+                layer = nn.Linear(in_ch, out_ch, bias=True)
 
-            self.layers.append(layer)
-            self.dropouts.append(nn.Dropout(dropout) if dropout > 0 else nn.Identity())
+            self.layers.append(layer.to(self.dtype))
+            self.dropouts.append(nn.Dropout(dropout).to(self.dtype) if dropout > 0 else nn.Identity().to(self.dtype))
 
     def forward(self, x):
         reshaped = False
         original_shape = x.shape
+        if x.dtype is not self.dtype:
+            x = x.to(self.dtype)
 
         if self.mode == 'channel':
             if x.ndim > 3:
@@ -82,9 +87,14 @@ class MLP(nn.Module):
                 reshaped = True
 
         for i in range(self.n_layers):
+            # _dump_tensor(f"x_{self.mode}_{i}_init", x)
             x = self.layers[i](x)
+            # _dump_tensor(f"x_{self.mode}_{i}", x)
+
             if i < self.n_layers - 1:
                 x = self.non_linearity(x)
+                # _dump_tensor(f"x_act_{self.mode}_{i}",x)
+            
             x = self.dropouts[i](x)
 
         if self.mode == 'channel' and reshaped:

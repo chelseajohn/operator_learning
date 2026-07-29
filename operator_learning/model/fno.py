@@ -6,7 +6,7 @@ import torch.nn as nn
 import pandas as pd
 import torch.nn.functional
 from operator_learning.utils.memory_utils import CudaMemoryDebugger, format_mem
-from operator_learning.utils.misc import print_rank0
+from operator_learning.utils.misc import print_rank0, _dump_tensor
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer, NUFFTLayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
 from operator_learning.data.transforms.vandermonde_matrix_free import VandermondeTransformMatrixFree
@@ -108,6 +108,8 @@ class FNO(nn.Module):
                  use_complex_amp=False,
                  matrix_free=False,
                  device='cpu',
+                 dtype=torch.float32,
+                 fno_dtype=torch.float32,
                  **kwargs
                  ):
         
@@ -132,9 +134,11 @@ class FNO(nn.Module):
 
         self.dataClass = dataClass
         self.dataset = dataset if dataClass == 'rbc' else None
-        self.data_type = torch.float16 if use_complex_amp and self.training else torch.float32
+        self.data_type = torch.float16 if use_complex_amp and self.training else dtype  # For P & Q layers
         self.tp_mesh = kwargs.get("tp_mesh", None)
         self.matrix_free = matrix_free
+        self.fno_dtype = fno_dtype
+        print_rank0(f"Using {self.data_type} for P and Q layers and {self.fno_dtype} for DSE Layer")
 
         if use_dse:
             self.layers = nn.ModuleList(
@@ -145,6 +149,7 @@ class FNO(nn.Module):
                           dim=n_dims,
                           use_complex_amp=use_complex_amp,
                           tp_mesh=self.tp_mesh,
+                          dtype=self.fno_dtype,  # FP64 necessary for input sharding
                          )
                  for _ in range(n_layers)])
         # elif use_toeplitz:
@@ -185,19 +190,23 @@ class FNO(nn.Module):
                         in_channels=da,
                         out_channels=dv,
                         hidden_channels=round(dv*channel_mlp_expansion),
+                        dtype=self.data_type
                     )
-        self.Q = MLP( mode='linear',
+        self.Q = MLP(mode='linear',
                         n_dims=n_dims,
                         n_layers=2,
                         in_channels=dv,
                         out_channels=du,
                         hidden_channels=round(dv*channel_mlp_expansion),
+                        dtype=self.data_type
                     )
        
         self.memory = CudaMemoryDebugger(print_mem=True)
  
 
-    def forward(self, x):
+    def forward(self, x, x_pos_min=None, x_pos_max=None,
+                y_pos_min=None, y_pos_max=None,
+                z_pos_min=None, z_pos_max=None):
         """
         RBC2D/3D:
             x[batchsize, da, nX, nY, (nZ)] -> [batchsize, du, nX, nY, (nZ)] 
@@ -210,25 +219,31 @@ class FNO(nn.Module):
                 if self.matrix_free:
                     transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
                                                        kX=self.kX, 
+                                                       x_pos_min=x_pos_min,
+                                                       x_pos_max=x_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=self.data_type
+                                                       dtype=self.fno_dtype
                                                         )
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                        kX=self.kX, 
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=self.data_type)
+                                                       dtype=self.fno_dtype)
             elif self.n_dims == 2:
                 if self.matrix_free:
                     transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
                                                        y_positions=x[:,1,:],
                                                        kX=self.kX, 
                                                        kY=self.kY,
+                                                       x_pos_min=x_pos_min,
+                                                       x_pos_max=x_pos_max,
+                                                       y_pos_min=y_pos_min,
+                                                       y_pos_max=y_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=self.data_type)
+                                                       dtype=self.fno_dtype)
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                         y_positions=x[:,1,:],
@@ -236,7 +251,7 @@ class FNO(nn.Module):
                                                         kY=self.kY,
                                                         dim=self.n_dims,
                                                         device=self.device,
-                                                        dtype=self.data_type)
+                                                        dtype=self.fno_dtype)
             else:
                 if self.matrix_free:
                     transform_coeff = VandermondeTransformMatrixFree(x_positions=x[:,0,:], 
@@ -245,9 +260,15 @@ class FNO(nn.Module):
                                                        kX=self.kX, 
                                                        kY=self.kY,
                                                        kZ=self.kZ,
+                                                       x_pos_min=x_pos_min,
+                                                       x_pos_max=x_pos_max,
+                                                       y_pos_min=y_pos_min,
+                                                       y_pos_max=y_pos_max,
+                                                       z_pos_min=z_pos_min,
+                                                       z_pos_max=z_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=self.data_type)
+                                                       dtype=self.fno_dtype)
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                         y_positions=x[:,1,:],
@@ -257,7 +278,7 @@ class FNO(nn.Module):
                                                         kZ=self.kZ,
                                                         dim=self.n_dims,
                                                         device=self.device,
-                                                        dtype=self.data_type)
+                                                        dtype=self.fno_dtype)
                 
 
         # if self.use_toeplitz:
@@ -267,25 +288,29 @@ class FNO(nn.Module):
         #                                      dim=self.n_dims, 
         #                                      dtype=self.data_type)
         
-        if self.use_kb:
-            transform_coeff = NUFFTTransform(device=self.device, 
-                                             dataClass='pic',
-                                             transform='kb', 
-                                             dim=self.n_dims, 
-                                             dtype=self.data_type)
+        # if self.use_kb:
+        #     transform_coeff = NUFFTTransform(device=self.device, 
+        #                                      dataClass='pic',
+        #                                      transform='kb', 
+        #                                      dim=self.n_dims, 
+        #                                      dtype=self.data_type)
 
+        if x.dtype is not self.data_type:
+            x = x.to(self.data_type)
 
         x = x.permute(0,2,1)
         x = self.P(x)
         x = x.permute(0,2,1)
+        # _dump_tensor("p", x)
 
         for index,layer in enumerate(self.layers):
             x = layer(x, transform_coeff)
+            # _dump_tensor(f"x_{index}",x)
           
         x = x.permute(0,2,1)
         x = self.Q(x)
         x = x.permute(0,2,1)
- 
+        # _dump_tensor("q", x)
 
         return x
 

@@ -15,7 +15,7 @@ import torch.cuda.nvtx as nvtx
 from operator_learning.data import getDataLoaders
 from operator_learning.model import FNO
 from operator_learning.loss import LOSSES_CLASSES
-from operator_learning.utils.communication import Communicator
+from operator_learning.utils.communication import Communicator, get_rank
 from operator_learning.utils.misc import (
     print_rank0,
     NoScale,
@@ -24,7 +24,10 @@ from operator_learning.utils.misc import (
     scheduler_step,
     register_dtype_hooks,
     enable_tf32_only_on_a100,
-    count_flops
+    count_flops,
+    clone_grads,
+    clone_state_dict,
+    _dump_tensor
 )
 
 class FourierNeuralOperator:
@@ -37,7 +40,8 @@ class FourierNeuralOperator:
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
                 loss:dict=None, profile:dict=None, checkpoint=None,
                 eval_only=False, debug=False, device=None, benchmark=False, use_complex_amp=False,
-                use_amp=False, compile=False, compile_mode='default', data_class='pic'):
+                use_amp=False, compile=False, compile_mode='default', data_class='pic', 
+                model_dtype=torch.float32, fno_dtype=torch.float32):
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,6 +51,8 @@ class FourierNeuralOperator:
         self.world_size = int(os.getenv('WORLD_SIZE', '1'))
         self.debug = debug
         self.benchmark = benchmark
+        self.fno_dtype = fno_dtype
+        self.model_dtype = model_dtype   # FNO_DSE layer is kept in fno_dtype choose float32 or float64 for other layers
         self.use_amp = use_amp
         self.use_complex_amp = use_complex_amp  # explicit casting to Float16 for complex numbers
         assert not (use_complex_amp and not use_amp), "use_complex_amp=True requires use_amp=True"
@@ -213,8 +219,10 @@ class FourierNeuralOperator:
     # Setup and utility methods
     # -------------------------------------------------------------------------
     def setupModel(self, model_config):
-        self.model = FNO(**model_config, dataset=self.dataset, dataClass=self.dataClass,\
-                          use_complex_amp=self.use_complex_amp, device=self.device, tp_mesh=self.tp_mesh).to(self.device)
+        self.model = FNO(**model_config, dataset=self.dataset, dataClass=self.dataClass,
+                          use_complex_amp=self.use_complex_amp, device=self.device, 
+                          tp_mesh=self.tp_mesh, dtype=self.model_dtype, 
+                          fno_dtype=self.fno_dtype).to(self.device)
 
         # hooks = register_dtype_hooks(self.model)
         self.modelConfig = model_config.copy()
@@ -246,7 +254,7 @@ class FourierNeuralOperator:
 
     def setupLRScheduler(self,lr_scheduler=None):
         if lr_scheduler is None:
-            lr_scheduler = {"scheduler": "StepLR", "step_size": 100.0, "gamma": 0.98}
+            lr_scheduler = {"scheduler": "ConstantLR", "factor": 1.0, "total_iters": 10**12}
         self.scheduler_config = lr_scheduler.copy()
         scheduler = self.scheduler_config.pop('scheduler')
         self.scheduler_name = scheduler
@@ -254,6 +262,8 @@ class FourierNeuralOperator:
             self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, **self.scheduler_config)
         elif scheduler == "CosAnnealingLR":
             self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, **self.scheduler_config)
+        elif scheduler == 'ConstantLR':
+            self.lr_scheduler = torch.optim.lr_scheduler.ConstantLR(self.optimizer, **self.scheduler_config)
         else:
             raise ValueError(f"LR scheduler {scheduler} not implemented yet")
 
@@ -327,6 +337,16 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
+                    dim = data[0].shape[1]
+                    x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
+                    if dim > 1:
+                        y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
+                    else:
+                        y_pos_min, y_pos_max = None, None
+                    if dim > 2:
+                        z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
+                    else:
+                        z_pos_min, z_pos_max = None, None
                 if self.dataClass == 'pic':
                     # sharding particles across tp ranks
                     if self.TP_enabled:
@@ -345,20 +365,28 @@ class FourierNeuralOperator:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
 
-                if iBatch == 0:
+                if self.benchmark and iBatch == 0:
                     forward_flops, backward_flops, total_flops = count_flops(
                                                             model=model,
                                                             x=inp,
                                                             y=ref,
                                                             loss_fn=self.lossFunction,
                                                             device=self.device,
-                                                            dtp_group=None
+                                                            dtp_group=None,
+                                                            ddp_enabled=self.DDP_enabled
                                                         )
+                
+                if self.debug:
+                    param_before = clone_state_dict(model)
 
                 # Forward pass
                 if self.enable_profile:
                     nvtx.range_push("forward")
-                pred = model(inp)
+                pred = model(inp,
+                            x_pos_min=x_pos_min, x_pos_max=x_pos_max,
+                            y_pos_min=y_pos_min, y_pos_max=y_pos_max, 
+                            z_pos_min=z_pos_min, z_pos_max=z_pos_max
+                            )
                 if self.enable_profile:
                     nvtx.range_pop()   # end forward
     
@@ -407,22 +435,7 @@ class FourierNeuralOperator:
             #             dist.all_reduce(param.grad, group=self.tp_mesh.get_group())
             #             param.grad /= self.tp_size
 
-            if self.debug:
-                any_grad_nonzero = False
-                for name, p in self.model.named_parameters():
-                    if p.grad is not None and p.grad.abs().sum() > 0:
-                        any_grad_nonzero = True
-                        break
-                print_rank0(f"[DEBUG] Any nonzero gradients: {any_grad_nonzero}")
-                for name, param in self.model.named_parameters():
-                    if param.grad is None:
-                        print_rank0(f"[DEBUG] {name} has no gradient")
-                    else:
-                        print_rank0(f"[DEBUG] {name} grad mean: {param.grad.mean().item():.6e}")
-
-                real_model = self.model.module if self.DDP_enabled else self.model
-                param_before = real_model.P.layers[0].weight.clone()
-
+            
             # Optimizer
             if self.enable_profile:
                 nvtx.range_push("optimizer_step")
@@ -430,6 +443,21 @@ class FourierNeuralOperator:
                 optimizer_step(self.scaler, optimizer)
             if self.enable_profile:
                 nvtx.range_pop() # end optimizer
+
+            if self.debug:
+                grads_debug = clone_grads(model)
+                param_after = clone_state_dict(model)
+                torch.save(
+                    {
+                        "input": inp.detach().cpu(),
+                        "target": ref.detach().cpu(),
+                        "output": pred.detach().cpu(),
+                        "loss": loss.detach().cpu(),
+                        "params_before": param_before,
+                        "grads": grads_debug,
+                        "params_after": param_after,
+                }, self.fullPath('debugger.pt')
+            )
 
             if self.benchmark and iBatch % 10 == 0:
                 allocated = torch.cuda.memory_allocated() / (1024 ** 2)  # MB
@@ -440,24 +468,6 @@ class FourierNeuralOperator:
             if self.enable_profile:
                 if self.profiler_type == "torch":
                     self.profiler.step()
-
-            if self.debug:
-                param_after = real_model.P.layers[0].weight
-                print_rank0(f"Param changed: {not torch.allclose(param_before, param_after)}")
-                param_change = (param_before - param_after).norm().item()
-                print_rank0(f"[DEBUG] Parameter change norm: {param_change:.6e}")
-                # check if params update + optimizer states populated
-                with torch.no_grad():
-                    first_param = next(model.parameters())
-                    print_rank0(f"[DEBUG][train] Param[0] value sample: {first_param.view(-1)[0].item():.6e}")
-                opt_state = optimizer.state_dict()
-                if opt_state["state"]:
-                    first_state = next(iter(opt_state["state"].values()))
-                    for k, v in first_state.items():
-                        if isinstance(v, torch.Tensor):
-                            print_rank0(f"[DEBUG][train] Optimizer state {k}: mean={v.float().mean().item():.6e}")
-                else:
-                    print_rank0("[DEBUG][train] Optimizer state is EMPTY after step()!")
 
             grads = torch.cat([p.grad.flatten() for p in model.parameters() if p.grad is not None])
             grad_norm = grads.norm()
@@ -508,8 +518,11 @@ class FourierNeuralOperator:
             nvtx.range_pop() # end epoch
 
         print_rank0(
-                f"Train Epoch {self.epochs} time [min]: {(end_epoch_time - start_epoch_time) / 60.0}, average TFLOPs = {total_flops * nBatches / (end_epoch_time - start_epoch_time) / 1e12}"
-            )
+                f"Train Epoch {self.epochs} time [min]: {(end_epoch_time - start_epoch_time) / 60.0}")
+        if self.benchmark:
+            print_rank0(
+                    f"average TFLOPs = {total_flops * nBatches / (end_epoch_time - start_epoch_time) / 1e12}"
+                )
 
     def valid(self):
         model = self.model.eval()
@@ -539,6 +552,16 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
+                    dim = data[0].shape[1]
+                    x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
+                    if dim > 1:
+                        y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
+                    else:
+                        y_pos_min, y_pos_max = None, None
+                    if dim > 2:
+                        z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
+                    else:
+                        z_pos_min, z_pos_max = None, None
                 if self.dataClass == 'pic':
                     # sharding particles across tp ranks
                     if self.TP_enabled:
@@ -557,7 +580,11 @@ class FourierNeuralOperator:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
 
-                pred = model(inp)
+                pred = model(inp,
+                            x_pos_min=x_pos_min, x_pos_max=x_pos_max,
+                            y_pos_min=y_pos_min, y_pos_max=y_pos_max, 
+                            z_pos_min=z_pos_min, z_pos_max=z_pos_max
+                            )
                 local_loss = self.lossFunction(pred,ref)
                 error_nr = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))
                 error_dr = torch.mean(torch.abs(ref.flatten(start_dim=1)))
@@ -809,9 +836,6 @@ class FourierNeuralOperator:
             "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
             }
 
-        if self.debug:
-            #  verify optimizer state saved
-            print_rank0(f"[DEBUG][save] Saving optimizer with {len(self.optimizer.state_dict()['state'])} entries")
 
         if self.rank == 0:
             torch.save(checkpoint, path)
@@ -841,7 +865,7 @@ class FourierNeuralOperator:
                 name = k if k.startswith('module.') else 'module.' + k
             else:
                 name = k[7:] if k.startswith('module.') else k
-            if v.dtype == torch.complex64:
+            if torch.is_complex(v):
                 new_state_dict[name] = torch.view_as_real(v)
             else:
                 new_state_dict[name] = v
@@ -870,16 +894,6 @@ class FourierNeuralOperator:
             self.setupLRScheduler({"scheduler": checkpoint['lr_scheduler']}.update(checkpoint['lr_scheduler_state_dict']))
             self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
 
-            if self.debug:
-                # inspect optimizer state after load
-                opt_state = self.optimizer.state_dict()
-                print_rank0(f"[DEBUG][load] Loaded optimizer with {len(opt_state['state'])} entries")
-                for k, v in opt_state["state"].items():
-                    for name, t in v.items():
-                        if isinstance(t, torch.Tensor):
-                            print_rank0(f"[DEBUG][load] Param {k} - {name}: device={t.device}, mean={t.float().mean().item():.6e}")
-
-
         # waiting for all ranks to load checkpoint
         if self.DDP_enabled:
             dist.barrier()
@@ -896,7 +910,7 @@ class FourierNeuralOperator:
     # Inference method
     # -------------------------------------------------------------------------
     def __call__(self, u0, nEval=1):
-        enable_tf32_only_on_a100()
+        # enable_tf32_only_on_a100()
         model = self.model.eval()
         inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
 
@@ -909,5 +923,8 @@ class FourierNeuralOperator:
                 inpt = outp
 
         # u1 = outp.cpu().detach().numpy()
-        u1 = cp.from_dlpack(outp.detach())
+        if outp.is_cuda:
+            u1 = cp.from_dlpack(outp.detach())
+        else:
+            u1 = cp.array(outp.detach().numpy())  # CPU eval
         return u1
