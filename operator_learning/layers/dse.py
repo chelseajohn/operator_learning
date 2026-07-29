@@ -19,10 +19,6 @@ class SpectralConv_dse(nn.Module):
     def __init__(self, dv, kX, kY=None, kZ=None, dataClass='pic', bias=False, 
                  dim=1, use_complex_amp=False, tp_mesh=None, dtype=torch.complex64):
         
-        """
-        Spectral weights R and Bias must be kept in Float64 when particle 
-        sharding is  enabled.
-        """
         super().__init__()
         assert dim in (1,2, 3), "implemented only for PIC1D, PIC2D and PIC3D"
         self.dim = dim
