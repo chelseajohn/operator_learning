@@ -83,6 +83,7 @@ eval:
   nParticle: 500000
   Qm : -1
   ref: pif
+  predOnly: true
 
 testCases:
   bti: 
@@ -110,7 +111,6 @@ testCases:
     dt: 0.01
     kc: 0.5
     alpha: 0.01
-    predOnly: true
   
 profile:
   enableProfiler: false

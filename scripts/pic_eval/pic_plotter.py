@@ -227,18 +227,18 @@ class PICVisualizer:
                 if (it%100==0) or (it==(self.NT-1)):
                     if ml_acc:
                         if(self.ref == 'pif'):
-                            self.field2D_histogram(xp.get(), NG=512, output_filename=f"rho_pinop_{it}.png")
-                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
+                            self.field2D_histogram(xp.get(), NG=512, output_filename=f"rho_pinop_{it}")
+                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_pinop_{it}")
                         else:
-                            self.field2D_histogram((xp-self.Ln[0]/2).get(), NG=512, output_filename=f"rho_pinop_{it}.png")
-                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
+                            self.field2D_histogram((xp-self.Ln[0]/2).get(), NG=512, output_filename=f"rho_pinop_{it}")
+                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_pinop_{it}")
                     else:
                         if(self.ref == 'pif'):
-                            self.field2D_histogram(xp.get(), NG=512, output_filename=f"rho_{self.ref}_{it}.png")
-                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
+                            self.field2D_histogram(xp.get(), NG=512, output_filename=f"rho_{self.ref}_{it}")
+                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}")
                         else:
-                            self.field2D_histogram((xp-self.Ln[0]/2).get(), NG=512, output_filename=f"rho_{self.ref}_{it}.png")
-                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
+                            self.field2D_histogram((xp-self.Ln[0]/2).get(), NG=512, output_filename=f"rho_{self.ref}_{it}")
+                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}")
 
             vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it, testCase=self.testCase, B0=self.B0)
             # Update positions and weights
@@ -516,7 +516,6 @@ class PICVisualizer:
         plt.tight_layout(rect=[0, 0, 1, 0.96])
         plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)
         plt.close()
-
 
     def visualize_Efield(self, positions, efield, timestep, output_filename):
         """
