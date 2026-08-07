@@ -7,6 +7,7 @@ import cupy as cp
 import time
 from tqdm import tqdm
 from scipy import sparse
+import matplotlib
 import matplotlib.pyplot as plt
 import h5py
 from initial_conditions import InvTransSampling, inv_trans_sampling_gpu
@@ -62,8 +63,8 @@ class PICVisualizer:
             self.Q = self.L[0]/ (self.QM * self.N)                                 # Charge of a particle                                                    
             self.rho_back = - self.Q * self.N / self.L[0]                          # background rho     
         elif self.dim == 2:
-            #self.Q = self.L[0] * self.L[1] / (self.QM * self.N)  
-            self.Q = (self.L[0] * self.L[1] * 10) / (self.QM * self.N)  
+            #self.Q = self.L[0] * self.L[1] / (self.QM * self.N)  # PIF
+            self.Q = (self.L[0] * self.L[1] * 10) / (self.QM * self.N)  #PEPC
             self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1])
         else:
             self.Q = self.L[0] * self.L[1] * self.L[2] / (self.QM * self.N)  
@@ -580,7 +581,7 @@ class PICVisualizer:
         plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)
         plt.close()
      
-     def field2D_histogram(self, xp, NG, output_filename):
+    def field2D_histogram(self, xp, NG, output_filename):
 
         xlim_val = float(max(np.abs(xp[0,:]).max(), np.abs(xp[1,:]).max())) * 1.3
 

@@ -234,8 +234,8 @@ def inv_trans_sampling_gpu(alpha, k, L, N, dim=1,
 
     elif(label == 'cyclotron'):
         assert dim == 2, 'Cyclotron test case only for 2D' 
-        #sigmas = cp.array([Larr[0]/10,Larr[1]/30]) / cp.sqrt(2) # Control the shape of the beam
-        sigmas = cp.array([Larr[0]/30,Larr[1]/10]) / cp.sqrt(2) # Control the shape of the beam
+        #sigmas = cp.array([Larr[0]/10,Larr[1]/30]) / cp.sqrt(2) # PIF- Control the shape of the beam
+        sigmas = cp.array([Larr[0]/30,Larr[1]/10]) / cp.sqrt(2) # PEPC-Control the shape of the beam
         X = cp.random.randn(dim, N) * sigmas
         if(ref == 'pic'):
             X = X + cp.array([0.5*Larr[0], 0.5*Larr[1]])
