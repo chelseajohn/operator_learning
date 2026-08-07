@@ -62,7 +62,8 @@ class PICVisualizer:
             self.Q = self.L[0]/ (self.QM * self.N)                                 # Charge of a particle                                                    
             self.rho_back = - self.Q * self.N / self.L[0]                          # background rho     
         elif self.dim == 2:
-            self.Q = self.L[0] * self.L[1] / (self.QM * self.N)  
+            #self.Q = self.L[0] * self.L[1] / (self.QM * self.N)  
+            self.Q = (self.L[0] * self.L[1] * 10) / (self.QM * self.N)  
             self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1])
         else:
             self.Q = self.L[0] * self.L[1] * self.L[2] / (self.QM * self.N)  
@@ -221,18 +222,22 @@ class PICVisualizer:
                     Efieldparticle, a = gatherFourier(XP=xp, EHat=EHat, SHat=SHat, QM=self.QM, L=self.Ln, dim=self.dim, testCase=self.testCase) 
                 times_acc.append(time.time() - t0)
            
-            #if(self.testCase == 'cyclotron'):
-            #    if (it%100==0) or (it==(self.NT-1)):
-            #        if ml_acc:
-            #            if(self.ref == 'pif'):
-            #                self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
-            #            else:
-            #                self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
-            #        else:
-            #            if(self.ref == 'pif'):
-            #                self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
-            #            else:
-            #                self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
+            if(self.testCase == 'cyclotron'):
+                if (it%100==0) or (it==(self.NT-1)):
+                    if ml_acc:
+                        if(self.ref == 'pif'):
+                            self.field2D_histogram(xp.get(), NG=512, output_filename=f"rho_pinop_{it}.png")
+                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
+                        else:
+                            self.field2D_histogram((xp-self.Ln[0]/2).get(), NG=512, output_filename=f"rho_pinop_{it}.png")
+                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_pinop_{it}.png")
+                    else:
+                        if(self.ref == 'pif'):
+                            self.field2D_histogram(xp.get(), NG=512, output_filename=f"rho_{self.ref}_{it}.png")
+                            self.visualize_Efield(xp.get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
+                        else:
+                            self.field2D_histogram((xp-self.Ln[0]/2).get(), NG=512, output_filename=f"rho_{self.ref}_{it}.png")
+                            self.visualize_Efield((xp-self.Ln[0]/2).get(), Efieldparticle.get(), it, f"Efield_{self.ref}_{it}.png")
 
             vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it, testCase=self.testCase, B0=self.B0)
             # Update positions and weights
@@ -574,7 +579,37 @@ class PICVisualizer:
         plt.tight_layout(rect=[0, 0, 1, 0.96])
         plt.savefig(f'{self.eval_dir}/{filename}', dpi=200)
         plt.close()
-  
+     
+     def field2D_histogram(self, xp, NG, output_filename):
+
+        xlim_val = float(max(np.abs(xp[0,:]).max(), np.abs(xp[1,:]).max())) * 1.3
+
+        NBINS_D  = NG
+        rng_xy   = [[-xlim_val, xlim_val], [-xlim_val, xlim_val]]
+        hist0, _, _ = np.histogram2d(xp[0,:], xp[1,:], bins=NBINS_D, range=rng_xy)
+        rho_vmax = max(float(hist0.max()), 1.0)
+        rho_norm = matplotlib.colors.LogNorm(vmin=1, vmax=rho_vmax)
+        fig, ax = plt.subplots(figsize=(6,5))
+        im_rho = ax.imshow(
+        hist0.T, origin='lower',
+        extent=[-xlim_val, xlim_val, -xlim_val, xlim_val],
+        cmap='inferno', norm=rho_norm,
+        aspect='equal', interpolation='nearest',
+        )
+        ax.set_title(r'$\rho(x,\,y)$  density', fontsize=11)
+        ax.set_xlabel(r'$x\;[c/\omega_{pe}]$', fontsize=9)
+        ax.set_ylabel(r'$y\;[c/\omega_{pe}]$', fontsize=9)
+        ax.tick_params(labelsize=8)
+        ax.grid(alpha=0.15, color='white')
+        cbar_rho = fig.colorbar(im_rho, ax=ax, fraction=0.046, pad=0.04)
+        cbar_rho.set_label('counts / bin  (log)', fontsize=8)
+        cbar_rho.ax.tick_params(labelsize=7)
+        filename = self._img_path(output_filename)
+        fig.savefig(f'{self.eval_dir}/{filename}', dpi=200)
+        plt.close()
+        #rho_norm = matplotlib.colors.Normalize(vmin=0, vmax=rho_vmax)
+
+
     def instability(self, Ex = None, ExPred = None, Ey = None, EyPred = None, Ez = None, EzPred = None, label='tsi'):
         a = np.linspace(0, (self.NT - 1) * self.DT, self.NT)
         plt.figure()

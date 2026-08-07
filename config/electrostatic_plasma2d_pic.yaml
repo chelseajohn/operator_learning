@@ -80,7 +80,7 @@ eval:
   dim: 2
   NG : 32
   Vt: 1
-  nParticle: 100000
+  nParticle: 500000
   Qm : -1
   ref: pif
 
@@ -106,10 +106,11 @@ testCases:
     kc: 0.5
     alpha: 0.5
   cyclotron:
-    T: 12
+    T: 24
     dt: 0.01
     kc: 0.5
     alpha: 0.01
+    predOnly: true
   
 profile:
   enableProfiler: false
