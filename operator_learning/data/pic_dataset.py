@@ -21,6 +21,24 @@ class PICDataset(Dataset):
         self._file = None
         self.dataClass = kwargs.get('dataClass', 'pic')
 
+        # used for TP particle-sharding; each rank reads its own shard
+        # of the particle dimension directly from HDF5 file, the full
+        # particle array is never materialized on any single rank
+        self.tp_rank = kwargs.get('tp_rank', 0)
+        self.tp_size = kwargs.get('tp_size', 1)
+
+        # precompute shard boundaries once to avoid per-sample redundant HDF5 metadata reads
+        if self.tp_size > 1:
+            nParticles = self.inputs.shape[-1] # only retrieves metadata from h5py.Dataset object, does not read
+            assert nParticles % self.tp_size == 0, \
+                f"nParticle ({nParticles}) must be divisible by tp_size ({self.tp_size})"
+            particles_per_tp = nParticles // self.tp_size
+            self.shard_start = self.tp_rank * particles_per_tp
+            self.shard_end = self.shard_start + particles_per_tp
+        else:
+            self.shard_start = 0
+            self.shard_end = None
+
         if self.nDim == 2:
             self.kY = kwargs.get('kY', 12)
         else:
@@ -77,7 +95,8 @@ class PICDataset(Dataset):
             pass
 
     def sample(self, idx):
-        return self.inputs[idx], self.outputs[idx]
+        return self.inputs[idx, :, self.shard_start:self.shard_end], \
+               self.outputs[idx, :, self.shard_start:self.shard_end]
 
     @property
     def infos(self):

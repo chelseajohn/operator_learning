@@ -103,6 +103,7 @@ class FourierNeuralOperator:
             self.dp_size = 1
             self.effective_dp_size = 1
             self.tp_mesh = None
+            self.shard_idx = 0
     
             if self.DDP_enabled or self.TP_enabled:
                 self.communicator = Communicator(gpus_per_node, self.rank)
@@ -141,6 +142,7 @@ class FourierNeuralOperator:
             self.tp_size = 1
             self.tp_mesh = None
             self.dp_group= None
+            self.shard_idx = 0 
 
         # Evaluation-only mode
         if eval_only:
@@ -170,7 +172,8 @@ class FourierNeuralOperator:
                                                                         **self.data_config,
                                                                          kX=model['kX'], kY=model['kY'], 
                                                                          kZ=model['kZ'], dp_size=self.effective_dp_size,
-                                                                         tp_size=self.tp_size, accum_steps=self.accum_steps
+                                                                         tp_size=self.tp_size, tp_rank=self.shard_idx,
+                                                                         accum_steps=self.accum_steps
                                                                         )
         print_rank0(f"Using gradient accumulation in steps of {self.accum_steps} with local batchsize {self.trainLoader.batch_size}")
         self.outType = self.dataset.outType
@@ -337,30 +340,33 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
-                    dim = data[0].shape[1]
-                    x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
-                    if dim > 1:
-                        y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
-                    else:
-                        y_pos_min, y_pos_max = None, None
-                    if dim > 2:
-                        z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
-                    else:
-                        z_pos_min, z_pos_max = None, None
+                    if self.dataClass != 'pic':
+                        dim = data[0].shape[1]
+                        x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
+                        if dim > 1:
+                            y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
+                        else:
+                            y_pos_min, y_pos_max = None, None
+                        if dim > 2:
+                            z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
+                        else:
+                            z_pos_min, z_pos_max = None, None
                 if self.dataClass == 'pic':
+                    #data[0] and data[1] already contain this rank's particle shard
+                    #(slicing in PICDataset.sample())
+                    inp = data[0].to(self.device)
+                    ref = data[1].to(self.device)
                     # sharding particles across tp ranks
+                    dim = inp.shape[1]
+                    pos_min = torch.amin(inp, dim=(0,2)) #[dim]
+                    pos_max = torch.amax(inp, dim=(0,2))
                     if self.TP_enabled:
-                        nParticles = data[0].shape[-1]
-                        particles_per_tp = nParticles //self.tp_size
-                        start = self.shard_idx * particles_per_tp
-                        end = start + particles_per_tp
-                        # print(f'Train [Rank {self.rank}]: start_idx={start}, end_idx={end}')
-                    else:
-                        start = 0
-                        end = None
-
-                    inp = data[0][:,:, start:end].to(self.device)
-                    ref = data[1][:,:, start:end].to(self.device)
+                        tp_group = self.tp_mesh.get_group()
+                        dist.all_reduce(pos_min, op=dist.ReduceOp.MIN, group=tp_group)
+                        dist.all_reduce(pos_max, op=dist.ReduceOp.MAX, group=tp_group)
+                    x_pos_min, x_pos_max = pos_min[0], pos_max[0]
+                    y_pos_min, y_pos_max = (pos_min[1], pos_max[1]) if dim > 1 else (None, None)
+                    z_pos_min, z_pos_max = (pos_min[2], pos_max[2]) if dim > 2 else (None, None)
                 else:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
@@ -552,30 +558,32 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
-                    dim = data[0].shape[1]
-                    x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
-                    if dim > 1:
-                        y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
-                    else:
-                        y_pos_min, y_pos_max = None, None
-                    if dim > 2:
-                        z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
-                    else:
-                        z_pos_min, z_pos_max = None, None
+                    if self.dataClass != 'pic':
+                        dim = data[0].shape[1]
+                        x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
+                        if dim > 1:
+                            y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
+                        else:
+                            y_pos_min, y_pos_max = None, None
+                        if dim > 2:
+                            z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
+                        else:
+                            z_pos_min, z_pos_max = None, None
                 if self.dataClass == 'pic':
                     # sharding particles across tp ranks
+                    inp = data[0].to(self.device)
+                    ref = data[1].to(self.device)
+                    dim = inp.shape[1]
+                    pos_min = torch.amin(inp, dim=(0,2))
+                    pos_max = torch.amax(inp, dim=(0,2))
                     if self.TP_enabled:
-                        nParticles = data[0].shape[-1]
-                        particles_per_tp = nParticles //self.tp_size
-                        start = self.shard_idx * particles_per_tp
-                        end = start + particles_per_tp
+                        tp_group = self.tp_mesh.get_group()
+                        dist.all_reduce(pos_min, op=dist.ReduceOp.MIN, group=tp_group)
+                        dist.all_reduce(pos_max, op=dist.ReduceOp.MAX, group=tp_group)
                         # print(f'[Rank {self.rank}]: start_idx={start}, end_idx={end}')
-                    else:
-                        start = 0
-                        end = None
-
-                    inp = data[0][:,:, start:end].to(self.device)
-                    ref = data[1][:,:, start:end].to(self.device)
+                    x_pos_min, x_pos_max = pos_min[0], pos_max[0]
+                    y_pos_min, y_pos_max = (pos_min[1], pos_max[1]) if dim > 1 else (None, None)
+                    z_pos_min, z_pos_max = (pos_min[2], pos_max[2]) if dim > 2 else (None, None)
                 else:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
