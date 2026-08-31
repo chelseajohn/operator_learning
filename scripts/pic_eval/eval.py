@@ -61,6 +61,9 @@ parser.add_argument(
     "--fno_dtype", type=str, default="float32", 
     help="FNO_DSE Layer dtype, options['float32', 'float64'] ")
 parser.add_argument(
+    "--tp_size", type=int, default=1,
+    help="input particle sharding for inference, default 1 = no parallelism. Must equal WORLD_SIZE when launched with torchrun")
+parser.add_argument(
     "--config", default=None, help="configuration file")
 args = parser.parse_args()
 
@@ -92,14 +95,52 @@ np.random.seed(seed)
 cp.random.seed(seed)
 torch.cuda.manual_seed_all(seed)
 
+world_size = int(os.getenv('WORLD_SIZE', '1'))
+tp_size = args.tp_size
+
+# inference particle sharding
+if tp_size > 1:
+    assert world_size == tp_size, f"tp_size={tp_size} must be the same as WORLD_SIZE={world_size}"
+    
+    infer_parallel_strategy = {
+        "gpus_per_node": int(os.getenv('GPUS_PER_NODE', '4')),
+        "ddp": True,
+        "tp": True,
+        "tp_size": tp_size,
+    }
+else:
+    infer_parallel_strategy = None
+
+if checkpoint is not None:
+    fno_model = FourierNeuralOperator(
+        checkpoint=checkpoint,
+        eval_only=True,
+        device=device,
+        data_class='pic',
+        model_dtype=model_dtype,
+        fno_dtype=fno_dtype,
+        parallel_strategy=infer_parallel_strategy,
+    )
+    # extract TP params to later pass into PICVisualizer
+    if fno_model.TP_enabled:
+        tp_rank = fno_model.tp_rank     # local rank in TP group
+        tp_size = fno_model.tp_size
+        tp_mesh = fno_model.tp_mesh     # same mesh always gets reused
+    else:
+        tp_rank, tp_size, tp_mesh = 0, 1, None
+else:
+    fno_model = None
+    tp_rank, tp_size, tp_mesh = 0, 1, None
+
+
 for tc in config["testCases"]:
     args.__dict__.update(**config["testCases"][tc])
     args.evalDir = f"{config.eval.evalDir}/{tc}"
     args.testCase = tc
-    vis = PICVisualizer(args)
 
-    if checkpoint is not None:
-        fno_model = FourierNeuralOperator(checkpoint=checkpoint, eval_only=True, device=device, data_class='pic', model_dtype=model_dtype, fno_dtype=fno_dtype)
+    vis = PICVisualizer(args, tp_rank=tp_rank, tp_size=tp_size, tp_mesh=tp_mesh)
+
+    if fno_model is not None:
         posPred, velPred, wPred, EnergyPred, EkPred, EpPred, pPred, ExpPred, EypPred, EzpPred, timePred = vis.picND(ml_acc=True, model=fno_model, data_file=config.data.dataFile)
         phase_spacePred = None
 
@@ -188,3 +229,6 @@ for tc in config["testCases"]:
             speedup=speedup
             ))
     summary.close()
+
+if dist.is_initialized():
+    dist.destroy_process_group()

@@ -920,7 +920,9 @@ class FourierNeuralOperator:
     def __call__(self, u0, nEval=1):
         # enable_tf32_only_on_a100()
         model = self.model.eval()
-        inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
+        #inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
+        inpt = torch.from_dlpack(u0.toDlpack()).to(dtype=torch.get_default_dtype()) # This uses DLpack, zero-copy, instead of using torch.tensor() 
+                                                                                    # which on a CuPy array calls .get(), so its GPU to CPU back to GPU
 
         with torch.no_grad():
             for _ in range(nEval):

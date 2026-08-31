@@ -3,6 +3,7 @@ import numpy as np
 import cupy as cp
 from typing import Tuple, List, Optional
 import torch
+import torch.distributed as dist
 from torch.utils.data import Dataset
 from operator_learning.utils.misc import print_rank0
 
@@ -153,6 +154,30 @@ def normalize_per_sample(data: cp.ndarray) -> cp.ndarray:
     new_data = (data - data_min) / denom
     return new_data
 
+def normalize_per_sample_distributed(data: cp.ndarray, tp_mesh) -> cp.ndarray:
+    """
+    Normalize to [0,1] using global min/max across all TP ranks.
+    data shape: (1, dim, N_local) CuPy array
+    """
+    local_min = data.min(axis=2, keepdims=True)  # (1, dim, 1)
+    local_max = data.max(axis=2, keepdims=True)  # (1, dim, 1)
+
+    # zero-copy from CuPy to PyTorch tensor, without copying over CPU
+    # need pytorch for all_reduce, which accepts only pytorch tensors
+    t_min = torch.from_dlpack(local_min.toDlpack())
+    t_max = torch.from_dlpack(local_max.toDlpack())
+
+    # all_reduce to get global max/min
+    dist.all_reduce(t_min, op=dist.ReduceOp.MIN, group=tp_mesh.get_group())
+    dist.all_reduce(t_max, op=dist.ReduceOp.MAX, group=tp_mesh.get_group())
+    
+    # back to CuPy
+    global_min = cp.from_dlpack(torch.utils.dlpack.to_dlpack(t_min))
+    global_max = cp.from_dlpack(torch.utils.dlpack.to_dlpack(t_max))
+
+    # guard against division by 0 when max = min and normalize
+    denom = cp.where(global_max > global_min, global_max - global_min, 1.0)
+    return (data - global_min) / denom
 
 def normalize_global_zscore(data: np.ndarray) -> Tuple[np.ndarray, float, float]:
     """

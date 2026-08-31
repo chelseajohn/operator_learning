@@ -4,6 +4,8 @@ base_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(base_path))
 import numpy as np
 import cupy as cp
+import torch
+import torch.distributed as dist
 import time
 from tqdm import tqdm
 from scipy import sparse
@@ -16,11 +18,11 @@ from field import field, fieldInFourier
 from interpolation import interpMatrix, interpolate, p2g_g2p_nostencil_arrays, scatterFourier, gatherFourier
 from landau_decay import period, decayRate
 from energy import potential
-from operator_learning.data.pic_dataset import normalize_per_sample
+from operator_learning.data.pic_dataset import normalize_per_sample, normalize_per_sample_distributed
 from FourierKernels import specKernel, freeSpaceKernelsPIF, freeSpaceKernelsPIC
 
 class PICVisualizer:
-    def __init__(self, args):
+    def __init__(self, args, tp_rank=0, tp_size=1, tp_mesh=None):
         """
         Visualization utilities for PIC simulations.
 
@@ -30,7 +32,20 @@ class PICVisualizer:
         self.eval_dir = (self.base_dir / args.evalDir).resolve()
         self.eval_dir.mkdir(parents=True, exist_ok=True)
         self.QM = args.Qm
-        self.N = args.nParticle
+        self.N = args.nParticle # global particle count
+
+        self.tp_rank = tp_rank
+        self.tp_size = tp_size
+        self.tp_mesh = tp_mesh
+        self.tp_enabled = (tp_size > 1)
+
+        assert self.N % tp_size == 0, f"nParticle ({self.N}) must be divisible by tp_size ({tp_size})"
+
+        self.N_local = self.N // tp_size   # local particle number
+        self.shard_start = tp_rank * self.N_local
+        self.shard_end = self.shard_start + self.N_local
+
+
         self.NG = args.NG
         self.DT = args.dt
         self.T = args.T
@@ -70,9 +85,13 @@ class PICVisualizer:
             self.Q = self.L[0] * self.L[1] * self.L[2] / (self.QM * self.N)  
             self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1] * self.L[2])
        
+        # here there is a redundant generation of full initial conditions on each rank... will need to change the sampling function
+        # so that it accepts shard_start and end, and also advance the RNG state properly so the sharded output is the same as thisu nsharded...
+        xp0_full, vp0_full = inv_trans_sampling_gpu(alpha=self.alpha, k=self.kn, L=self.Ln, N=self.N, dim=self.dim, label=self.testCase, ref=self.ref)
+        self.xp0 = xp0_full[:, self.shard_start:self.shard_end].copy()
+        self.vp0 = vp0_full[:, self.shard_start:self.shard_end].copy()
 
-        self.xp0,self.vp0 = inv_trans_sampling_gpu(alpha=self.alpha, k=self.kn, L=self.Ln, N=self.N, dim=self.dim, label=self.testCase, ref=self.ref)
-        print(f"Initial conditions done")
+        print(f"[tp_rank {tp_rank}/{tp_size}] Initial conditions done: particles [{self.shard_start}, {self.shard_end}), xp0 shape {self.xp0.shape}")
         # Set matplotlib defaults (better figures)
         plt.rcParams.update({
             "figure.figsize": (6, 4),
@@ -167,14 +186,17 @@ class PICVisualizer:
             # Acceleration
             if ml_acc and model is not None:
                 t0 = time.time()
-                inputs = xp[None, :, :].copy() # [batch=1, channel=dim, particles]
-                inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
+                inputs = xp[None, :, :].copy() # [batch=1, channel=dim, N_local]
+                #inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
                 
-                if(self.dim > 1):
-                    inputs[:, 1, :] = normalize_per_sample(inputs[:, 1, :])
-                if(self.dim > 2):
-                    inputs[:, 2, :] = normalize_per_sample(inputs[:, 2, :])
-            
+                if self.tp_enabled:
+                    inputs = normalize_per_sample_distributed(inputs, self.tp_mesh)
+                else:
+                    # single GPU path
+                    for ch in range(self.dim):
+                        inputs[:, ch, :] = normalize_per_sample(inputs[:, ch, :])
+
+
                 prediction = model(inputs) # [1, channel=dim, particles]
                 Efieldparticle = prediction.squeeze()
                 if(self.dim == 1):
@@ -182,7 +204,15 @@ class PICVisualizer:
                     #Scale by normalization factor \alpha = Q_tot in 1D for the current problem
                     Efieldparticle = Efieldparticle * ((self.Q * self.N))
                     #Subtract volume average of electric field for periodic compatibility 
-                    Efieldparticle = Efieldparticle - ((1/self.N) * cp.sum(Efieldparticle))
+                    #Need global sum:
+                    local_sum = cp.sum(Efieldparticle)
+                    if self.tp_enabled:
+                        t_sum = torch.from_dlpack(local_sum.toDlpack())
+                        dist.all_reduce(t_sum, op=dist.ReduceOp.SUM, group=self.tp_mesh.get_group())
+                        global_sum = float(t_sum.item())
+                    else:
+                        global_sum = float(local_sum)
+                    Efieldparticle = Efieldparticle - (global_sum / self.N)
                 elif(self.dim == 2):
                     Efieldparticle[0] = Efieldparticle[0] * data_output_std[0] + data_output_mean[0]
                     Efieldparticle[1] = Efieldparticle[1] * data_output_std[1] + data_output_mean[1]
@@ -190,8 +220,16 @@ class PICVisualizer:
                     Efieldparticle[:,:] = Efieldparticle[:,:] * ((self.Q * self.N)/cp.sqrt(self.Ln[0] * self.Ln[1]))
                     if(self.testCase != 'cyclotron'):
                         #Subtract volume average of electric field for periodic compatibility 
-                        Efieldparticle[0] = Efieldparticle[0] - ((1/self.N) * cp.sum(Efieldparticle[0]))
-                        Efieldparticle[1] = Efieldparticle[1] - ((1/self.N) * cp.sum(Efieldparticle[1]))
+                        for ch in range(2): #channels 0 and 1
+                            local_sum = cp.sum(Efieldparticle[ch])
+                            if self.tp_enabled:
+                                t_sum = torch.from_dlpack(local_sum.toDlpack())
+                                dist.all_reduce(t_sum, op=dist.ReduceOp.SUM, group=self.tp_mesh.get_group())
+                                global_sum = float(t_sum.item())
+                            else:
+                                global_sum = float(local_sum)
+                            Efieldparticle[ch] = Efieldparticle[ch] - (global_sum / self.N)
+
                 else:
                     Efieldparticle[0] = Efieldparticle[0] * data_output_std[0] + data_output_mean[0]
                     Efieldparticle[1] = Efieldparticle[1] * data_output_std[1] + data_output_mean[1]
@@ -199,9 +237,16 @@ class PICVisualizer:
                     #Scale by normalization factor \alpha = Q_tot / (L_x * L_y * L_z)^(2/3) in 3D for the current problem
                     Efieldparticle[:,:] = Efieldparticle[:,:] * ((self.Q * self.N)/((self.Ln[0] * self.Ln[1] * self.Ln[2])**(2/3)))
                     #Subtract volume average of electric field for periodic compatibility 
-                    Efieldparticle[0] = Efieldparticle[0] - ((1/self.N) * cp.sum(Efieldparticle[0]))
-                    Efieldparticle[1] = Efieldparticle[1] - ((1/self.N) * cp.sum(Efieldparticle[1]))
-                    Efieldparticle[2] = Efieldparticle[2] - ((1/self.N) * cp.sum(Efieldparticle[2]))
+                    for ch in range(3):
+                        local_sum = cp.sum(Efieldparticle[ch])
+                        if self.tp_enabled:
+                            t_sum = torch.from_dlpack(local_sum.toDlpack())
+                            dist.all_reduce(t_sum, op=dist.ReduceOp.SUM, group=self.tp_mesh.get_group())
+                            global_sum = float(t_sum.item())
+                        else:
+                            global_sum = float(local_sum)
+                        Efieldparticle[ch] = Efieldparticle[ch] - (global_sum / self.N)
+
                 
                 a = accelerateML(E=Efieldparticle, wp=wp, QM=self.QM)
                 times_acc.append(time.time() - t0)
@@ -243,55 +288,65 @@ class PICVisualizer:
             vp, kinetic = push(vp=vp, a=a, DT=self.DT, Q=self.Q, QM=self.QM, wp=wp, it=it, testCase=self.testCase, B0=self.B0)
             # Update positions and weights
             xp, wp = move(xp=xp, vp=vp, wp=wp, DT=self.DT, L=self.Ln, it=it)
+
+            #helper functon to all_reduce a CuPy scalar across TP group
+            #returns float(x) when tp disabled or during reference run
+            def _tp_sum(x_cp):
+                if self.tp_enabled and ml_acc:
+                    t = torch.from_dlpack(x_cp.toDlpack())
+                    dist.all_reduce(t, op=dist.ReduceOp.SUM, group=self.tp_mesh.get_group())
+                    return float(t.item())
+                return float(x_cp)
+
             if(self.dim == 1):
                 # Mometum: Note since vp is at half time steps the momentum is calculated at these indices rather than integer time steps
-                mom = cp.abs(cp.sum(self.Q * vp / self.QM))
+                mom = _tp_sum(cp.abs(cp.sum(self.Q * vp / self.QM)))
                 # Electric field energy
-                Egpx = cp.sum(Efieldparticle[:] ** 2) * self.Ln[0] / self.N
+                Egpx = _tp_sum(cp.sum(Efieldparticle[:] ** 2) * self.Ln[0] / self.N)
                 # Compute potential energy
                 Epotential = 0.5 * Egpx
             elif(self.dim == 2):
                 if(self.testCase != 'cyclotron'):
-                    momx = cp.sum(self.Q * vp[0] / self.QM)
-                    momy = cp.sum(self.Q * vp[1] / self.QM)
-                    mom = cp.sqrt(momx**2 + momy**2)
+                    momx = _tp_sum(cp.sum(self.Q * vp[0] / self.QM))
+                    momy = _tp_sum(cp.sum(self.Q * vp[1] / self.QM))
+                    mom = (momx**2 + momy**2) ** 0.5
                 # Electric field energy
-                Egpx = cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
-                Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N
+                Egpx = _tp_sum(cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N)
+                Egpy = _tp_sum(cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1]) / self.N)
                 # Compute potential energy
                 Epotential = 0.5 * (Egpx + Egpy)
             else:
-                momx = cp.sum(self.Q * vp[0] / self.QM)
-                momy = cp.sum(self.Q * vp[1] / self.QM)
-                momz = cp.sum(self.Q * vp[2] / self.QM)
-                mom = cp.sqrt(momx**2 + momy**2 + momz**2)
+                momx = _tp_sum(cp.sum(self.Q * vp[0] / self.QM))
+                momy = _tp_sum(cp.sum(self.Q * vp[1] / self.QM))
+                momz = _tp_sum(cp.sum(self.Q * vp[2] / self.QM))
+                mom = (momx**2 + momy**2 + momz**2) ** 0.5
                 # Electric field energy
-                Egpx = cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N
-                Egpy = cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N
-                Egpz = cp.sum(Efieldparticle[2,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N
+                Egpx = _tp_sum(cp.sum(Efieldparticle[0,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N)
+                Egpy = _tp_sum(cp.sum(Efieldparticle[1,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N)
+                Egpz = _tp_sum(cp.sum(Efieldparticle[2,:]**2) * (self.Ln[0] * self.Ln[1] * self.Ln[2]) / self.N)
                 # Compute potential energy
                 Epotential = 0.5 * (Egpx + Egpy + Egpz)
 
-
+            kinetic = _tp_sum(kinetic)
             
             # Append energies and momentum
-            Ek.append(kinetic.get())
-            Ep.append(Epotential.get())
-            E.append((kinetic + Epotential).get())
-            Exp.append(Egpx.get())
+            Ek.append(kinetic)
+            Ep.append(Epotential)
+            E.append(kinetic + Epotential)
+            Exp.append(Egpx)
             if(self.dim > 1):
-                Eyp.append(Egpy.get())
+                Eyp.append(Egpy)
             if(self.dim > 2):
-                Ezp.append(Egpz.get())
+                Ezp.append(Egpz)
             if(self.testCase != 'cyclotron'):
-                momentum.append(mom.get())
+                momentum.append(mom)
             else:
                 momentum = None
 
         time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
 
-        return xp, vp, wp, E, Ek, Ep, momentum, Exp, Eyp, Ezp, time_acc_mean
+        return xp, vp, wp, np.array(E), np.array(Ek), np.array(Ep), momentum, np.array(Exp), np.array(Eyp), np.array(Ezp), time_acc_mean
 
     # ---------------------------
     # Plotting methods
