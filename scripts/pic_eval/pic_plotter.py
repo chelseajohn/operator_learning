@@ -88,6 +88,8 @@ class PICVisualizer:
         # here there is a redundant generation of full initial conditions on each rank... will need to change the sampling function
         # so that it accepts shard_start and end, and also advance the RNG state properly so the sharded output is the same as thisu nsharded...
         xp0_full, vp0_full = inv_trans_sampling_gpu(alpha=self.alpha, k=self.kn, L=self.Ln, N=self.N, dim=self.dim, label=self.testCase, ref=self.ref)
+        self.xp0_full = xp0_full.copy()   # full 100000, same on every rank, need for reference PIF run
+        self.vp0_full = vp0_full.copy()
         self.xp0 = xp0_full[:, self.shard_start:self.shard_end].copy()
         self.vp0 = vp0_full[:, self.shard_start:self.shard_end].copy()
 
@@ -138,7 +140,11 @@ class PICVisualizer:
             - Updates particle velocities and positions using standard or ML acceleration.
             - Computes kinetic, potential, and field energies, as well as momentum conservation.
         """
-        xp, vp = self.xp0.copy(), self.vp0.copy()
+        #xp, vp = self.xp0.copy(), self.vp0.copy()
+        if ml_acc:
+            xp, vp = self.xp0.copy(), self.vp0.copy() # sharded, N_local per rank
+        else:
+            xp, vp = self.xp0_full.copy(), self.vp0_full.copy() # full, self.N per rank
         wp = 1.0
 
         # Mean and Std of training output data
@@ -161,8 +167,16 @@ class PICVisualizer:
             Ezp = []
 
         # Time tracking
+        # using time.time() records on the CPU. CUDA kernel launches are async.
+        # therefore, for example, doing model(inputs) and time.time() right after it
+        # just measures the launch overhead instead of the actual execution time of the kernel.
+        # using cuda.Stream.null.synchronize() right before timing would serialize the work.
+        # instead, use cp.cuda.Event, which are markers recorded on the GPU's instruction stream at specific points
+        # events are non-blocking, and only cp.cuda.get_elapsed_time() needs the events to have completed
         times_acc = []
-    
+        # timing at 3 different times, after normalization, after the model returns the inference, and the very end.
+        _ev_start, _ev_norm, _ev_model, _ev_end = [], [], [], []
+
         if((self.ref == 'pif') and (self.testCase != 'cyclotron')):
             SHat = specKernel(NG=self.NG, L=self.Ln, dx=self.dxn, dim=self.dim)
 
@@ -185,7 +199,17 @@ class PICVisualizer:
 
             # Acceleration
             if ml_acc and model is not None:
-                t0 = time.time()
+                # the biggest culprit when timing the acceleration for the model
+                # all of these are kernels!
+                # so none are executed where they are writen in code, only queued up
+                # in CUDA's instruction queue
+                # so using time.time() here and then again directly after model(inputs)
+                # just records the enqueue times for all the calls between them, not the execution
+                e_start = cp.cuda.Event(); e_norm = cp.cuda.Event()
+                e_model = cp.cuda.Event(); e_end = cp.cuda.Event()
+                # .record() on an Event object inserts the record marker in the instruction queue
+                e_start.record()
+
                 inputs = xp[None, :, :].copy() # [batch=1, channel=dim, N_local]
                 #inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
                 
@@ -195,9 +219,11 @@ class PICVisualizer:
                     # single GPU path
                     for ch in range(self.dim):
                         inputs[:, ch, :] = normalize_per_sample(inputs[:, ch, :])
-
+                e_norm.record()
 
                 prediction = model(inputs) # [1, channel=dim, particles]
+                e_model.record()
+
                 Efieldparticle = prediction.squeeze()
                 if(self.dim == 1):
                     Efieldparticle = Efieldparticle * data_output_std + data_output_mean
@@ -249,9 +275,14 @@ class PICVisualizer:
 
                 
                 a = accelerateML(E=Efieldparticle, wp=wp, QM=self.QM)
-                times_acc.append(time.time() - t0)
+                e_end.record()
+
+                _ev_start.append(e_start); _ev_norm.append(e_norm)
+                _ev_model.append(e_model); _ev_end.append(e_end)
+
             else:
-                t0 = time.time()
+                e_start = cp.cuda.Event(); e_end = cp.cuda.Event()
+                e_start.record()
                 if(self.ref == 'pic'):
                     # Interpolation: particle -> grid
                     rho, _, _ = p2g_g2p_nostencil_arrays(XP=xp, DX=self.dxn, NG=self.NG, L=self.Ln, dim=self.dim, testCase=self.testCase, Q=self.Q, rho_back=self.rho_back)
@@ -266,7 +297,8 @@ class PICVisualizer:
                     phiHat, EHat = fieldInFourier(rhoHat=rhoHat, L=self.Ln, dim=self.dim, testCase=self.testCase, ref=self.ref, J=J, T1=T1, Q=self.Q, T2=T2) 
                     # Interpolation fields (in Fourier space) -> particles
                     Efieldparticle, a = gatherFourier(XP=xp, EHat=EHat, SHat=SHat, QM=self.QM, L=self.Ln, dim=self.dim, testCase=self.testCase) 
-                times_acc.append(time.time() - t0)
+                e_end.record()
+                _ev_start.append(e_start); _ev_end.append(e_end)
            
             if(self.testCase == 'cyclotron'):
                 if (it%100==0) or (it==(self.NT-1)):
@@ -343,10 +375,28 @@ class PICVisualizer:
             else:
                 momentum = None
 
-        time_acc_mean = np.round(np.mean(times_acc)*(10**3),3)
+        cp.cuda.Stream.null.synchronize()   # here we do a single sync for the whole run to ensure all events happened
+
+        times_acc = [cp.cuda.get_elapsed_time(s, e) for s, e in zip(_ev_start, _ev_end)]
+        time_acc_mean = np.round(np.mean(times_acc), 3)   # already in ms
         print(f"Average acceleration time per iteration: {time_acc_mean:.3f} millisec")
 
-        return xp, vp, wp, np.array(E), np.array(Ek), np.array(Ep), momentum, np.array(Exp), np.array(Eyp), np.array(Ezp), time_acc_mean
+        if ml_acc and model is not None:
+            norm_times  = [cp.cuda.get_elapsed_time(s, n) for s, n in zip(_ev_start, _ev_norm)]
+            model_times = [cp.cuda.get_elapsed_time(n, m) for n, m in zip(_ev_norm, _ev_model)]
+            post_times  = [cp.cuda.get_elapsed_time(m, e) for m, e in zip(_ev_model, _ev_end)]
+            for it in range(min(3, len(times_acc))):
+                print(f"[it={it}] norm:{norm_times[it]:.1f} model:{model_times[it]:.1f} post:{post_times[it]:.1f} ms")
+
+        return (xp, vp, wp,
+                np.array(E),
+                np.array(Ek),
+                np.array(Ep),
+                np.array(momentum) if momentum is not None else None,
+                np.array(Exp),
+                np.array(Eyp) if Eyp is not None else None,
+                np.array(Ezp) if Ezp is not None else None,
+                time_acc_mean)
 
     # ---------------------------
     # Plotting methods

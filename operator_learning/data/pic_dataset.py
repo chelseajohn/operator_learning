@@ -150,7 +150,7 @@ def normalize_per_sample(data: cp.ndarray) -> cp.ndarray:
     data_min = data.min(axis=1, keepdims=True)
     data_max = data.max(axis=1, keepdims=True)
     #denom = cp.where(data_max > data_min, data_max - data_min, 1.0)
-    denom = np.where(data_max > data_min, data_max - data_min, 1.0)
+    denom = cp.where(data_max > data_min, data_max - data_min, 1.0)
     new_data = (data - data_min) / denom
     return new_data
 

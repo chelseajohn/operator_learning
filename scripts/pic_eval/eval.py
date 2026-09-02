@@ -9,6 +9,7 @@ sys.path.append(str(base_path))
 
 import argparse
 import torch
+import torch.distributed as dist
 import numpy as np
 import cupy as cp
 
@@ -159,8 +160,12 @@ for tc in config["testCases"]:
         speedup = 1
 
     if predOnly is False:
-        posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, EypRef, EzpRef, timeRef = vis.picND(ml_acc=False)
-        phase_spaceRef = None
+        if tp_rank == 0:
+            posRef, velRef, wRef, EnergyRef, EkRef, EpRef, pRef, ExpRef, EypRef, EzpRef, timeRef = vis.picND(ml_acc=False)
+            phase_spaceRef = None
+        else:
+            posRef = velRef = wRef = EnergyRef = EkRef = EpRef = pRef = None
+            ExpRef = EypRef = EzpRef = timeRef = phase_spaceRef = None
     else:
         EnergyRef = None
         EkRef = None
@@ -175,12 +180,13 @@ for tc in config["testCases"]:
         growth_rateRef = None
         speedup = 1
 
-    energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EpRef=EpRef, EkPred=EkPred, EpPred=EpPred)
-    conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
-    if ((args.testCase == "weakLandau") or (args.testCase == "strongLandau")):
-        landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=args.testCase)
-    elif ((args.testCase == "tsi") or (args.testCase == "bti")):
-        growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=args.testCase)
+    if tp_rank == 0:
+        energy = vis.energy(ERef=EnergyRef, EPred=EnergyPred, EkRef=EkRef, EpRef=EpRef, EkPred=EkPred, EpPred=EpPred)
+        conserv_error = vis.conservation_errors(ERef=EnergyRef, EPred=EnergyPred, pRef=pRef, pPred=pPred)
+        if ((args.testCase == "weakLandau") or (args.testCase == "strongLandau")):
+            landau_decay = vis.landau_decay(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=args.testCase)
+        elif ((args.testCase == "tsi") or (args.testCase == "bti")):
+            growth_rate = vis.instability(Ex=ExpRef, ExPred=ExpPred, Ey=EypRef, EyPred=EypPred, Ez=EzpRef, EzPred=EzpPred, label=args.testCase)
     
     HEADER = dedent("""
     # FNO evaluation for PIC in {dim}D on {device}
@@ -215,20 +221,21 @@ for tc in config["testCases"]:
         TEMPLATE += f"Average Inference time for Accleration using FNO (millisec): {timePred}\n"
         TEMPLATE += f"Speed up PIC/FNO: {speedup}\n"
                     
-    summary.write(TEMPLATE.format(
-            dim=dim,
-            device=device,
-            energy=energy,
-            conserv_errors=conserv_error,
-            landau_decay=None,
-            phase_spaceRef=phase_spaceRef,
-            phase_spacePred=phase_spacePred,
-            growth_rate=None,
-            timeRef=timeRef,
-            timePred=timePred,
-            speedup=speedup
-            ))
-    summary.close()
+    if tp_rank == 0:
+        summary.write(TEMPLATE.format(
+                dim=dim,
+                device=device,
+                energy=energy,
+                conserv_errors=conserv_error,
+                landau_decay=None,
+                phase_spaceRef=phase_spaceRef,
+                phase_spacePred=phase_spacePred,
+                growth_rate=None,
+                timeRef=timeRef,
+                timePred=timePred,
+                speedup=speedup
+                ))
+        summary.close()
 
 if dist.is_initialized():
     dist.destroy_process_group()
