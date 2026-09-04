@@ -853,7 +853,31 @@ class FourierNeuralOperator:
             map_location = {f'cuda:0': f'{self.device}'}
         else:
             map_location = self.device
-        checkpoint = torch.load(self.fullPath(filename), map_location=map_location, weights_only=False)
+
+        path = self.fullPath(filename)
+
+        if self.DDP_enabled:
+            if self.rank == 0:
+                full_checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+                if modelOnly: # the checkpoint has at epoch250.pt 1 GB in model_state_dict, and 2 GB in optimizer_state_dict, never used during inference
+                    checkpoint = {
+                        'model': full_checkpoint['model'],
+                        'model_state_dict': full_checkpoint['model_state_dict'],
+                        'outType': full_checkpoint['outType'],
+                        'outScaling': full_checkpoint['outScaling'],
+                        'epochs': full_checkpoint.get('epochs'),
+                        'losses': full_checkpoint.get('losses'),
+                    }
+                    del full_checkpoint   # drops the 2 GB of the rest
+                else:
+                    checkpoint = full_checkpoint
+            else:
+                checkpoint = None
+            obj_list = [checkpoint]
+            dist.broadcast_object_list(obj_list, src=0, device=self.device)
+            checkpoint = obj_list[0]
+        else:
+            checkpoint = torch.load(path, map_location=map_location, weights_only=False)
 
         if hasattr(self, "modelConfig") and self.modelConfig != checkpoint['model']:
             for key, value in self.modelConfig.items():
