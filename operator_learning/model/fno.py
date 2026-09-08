@@ -19,7 +19,7 @@ class FNOLayer(nn.Module):
                  n_dims=2,
                  use_skip_connection=False, 
                  use_postfnochannel_mlp=False,
-                 skip_type='linear',
+                 skip_type='conv',
                  use_complex_amp=False
                  ):
         super().__init__()
@@ -99,7 +99,7 @@ class FNO(nn.Module):
                  use_postfnochannel_mlp=False,
                  channel_mlp_expansion=4,
                  use_skip_connection=False, 
-                 skip_type='linear',
+                 skip_type='conv',
                  use_dse=False,
                  use_toeplitz=False,
                  use_kb=False,
@@ -150,6 +150,9 @@ class FNO(nn.Module):
                           use_complex_amp=use_complex_amp,
                           tp_mesh=self.tp_mesh,
                           dtype=self.fno_dtype,  # FP64 necessary for input sharding
+                          use_skip_connection=use_skip_connection, 
+                          use_postfnochannel_mlp=use_postfnochannel_mlp,
+                          skip_type=skip_type,
                          )
                  for _ in range(n_layers)])
         # elif use_toeplitz:

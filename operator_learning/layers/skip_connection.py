@@ -7,14 +7,14 @@ import torch.nn as nn
 class SkipConnection(nn.Module):
     """
     SkipConnection supports 'identity', 
-    'linear', and 'soft-gating' skip types.
+    'conv', and 'soft-gating' skip types.
     
     Args:
         in_channel (int): Number of input channels.
         out_channel (int): Number of output channels.
         n_dims (int): Spatial dimensions (2 for Conv2D, 3 for Conv3D, etc).
-        skip_type (str): One of {'identity', 'linear', 'soft-gating'}.
-        bias (bool): Include bias in linear/soft-gating transforms.
+        skip_type (str): One of {'identity', 'conv', 'soft-gating'}.
+        bias (bool): Include bias in conv/soft-gating transforms.
     """
 
     def __init__(self, 
@@ -22,14 +22,16 @@ class SkipConnection(nn.Module):
                 out_channel,
                 n_dims=2,
                 skip_type="soft-gating",
-                bias=False):
+                bias=False,
+                dtype=torch.float32):
         super().__init__()
 
-        assert skip_type in {"identity", "linear", "soft-gating"}, f"Invalid skip_type: {skip_type}"
+        assert skip_type in {"identity", "conv", "soft-gating"}, f"Invalid skip_type: {skip_type}"
         self.skip_type = skip_type.lower()
+        self.dtype = dtype
 
         if self.skip_type == "identity":
-            self.skip = nn.Identity()
+            self.skip = nn.Identity().to(self.dtype)
 
         elif self.skip_type == "soft-gating":
             # Input: [bacthsize, channels, nX, nY, (nZ)]
@@ -40,17 +42,17 @@ class SkipConnection(nn.Module):
                     f"but got {in_channel} != {out_channel}"
                 )
             shape = (1, in_channel) + (1,) * n_dims  # e.g., (1, C, 1, 1) for 2D
-            self.weight = nn.Parameter(torch.ones(shape))
-            self.bias = nn.Parameter(torch.ones(shape)) if bias else None
+            self.weight = nn.Parameter(torch.ones(shape)).to(self.dtype)
+            self.bias = nn.Parameter(torch.ones(shape)).to(self.dtype) if bias else None
 
-        elif self.skip_type == "linear":
+        elif self.skip_type == "conv":
             # For Input shape > 3
             # Flattens all dimensions after bacthsize and channel
             # Applies 1D conv then un-flattens
             self.conv = nn.Conv1d(in_channels=in_channel,
                                   out_channels=out_channel,
                                   kernel_size=1,
-                                  bias=bias)
+                                  bias=bias).to(self.dtype)
 
     def forward(self, x):
         if self.skip_type == "identity":
@@ -59,7 +61,7 @@ class SkipConnection(nn.Module):
         elif self.skip_type == "soft-gating":
             return x * self.weight + self.bias if self.bias is not None else x * self.weight
 
-        elif self.skip_type == "linear":
+        elif self.skip_type == "conv":
             size = x.shape
             x = x.view(size[0], size[1], -1)  # flatten spatial dims
             x = self.conv(x)

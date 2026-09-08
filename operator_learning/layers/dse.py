@@ -7,6 +7,7 @@ import torch.nn as nn
 from operator_learning.utils.communication import get_world_size, get_rank
 from .linear import GridLinear
 from .mlp import MLP
+from .skip_connection import SkipConnection
 from operator_learning.utils.misc import (
     format_complexTensor,
     deformat_complexTensor,
@@ -156,7 +157,10 @@ class DSELayer(nn.Module):
                  dim=1,
                  use_complex_amp=False,
                  tp_mesh=None,
-                 dtype=torch.float32
+                 dtype=torch.float32,
+                 use_skip_connection=False, 
+                 use_postfnochannel_mlp=False,
+                 skip_type='conv',
                  ):
         super().__init__()
 
@@ -174,6 +178,8 @@ class DSELayer(nn.Module):
                                     use_complex_amp=use_complex_amp,
                                     tp_mesh=tp_mesh,
                                     dtype=self.spectral_dtype)  
+        self.use_skip_connection = use_skip_connection
+        self.use_postfnochannel_mlp = use_postfnochannel_mlp
     
         # self.W = GridLinear(
         #                inSize=dv, outSize=dv, hiddenSize=None,
@@ -182,13 +188,32 @@ class DSELayer(nn.Module):
         #                )
 
         self.W = MLP(mode='channel',
-                     n_dims=1,
+                     n_dims=dim,
                      n_layers=1,
                      in_channels=dv,
                      out_channels=dv,
                      hidden_channels=None,
-                     dtype=dtype,   # Need float64 when particle sharding is enabled
+                     dtype=dtype  
                     )
+
+        if use_skip_connection:
+            self.skip = SkipConnection(in_channel=dv,
+                                        out_channel=dv,
+                                        n_dims=dim,
+                                        skip_type=skip_type,
+                                        bias=bias,
+                                        dtype=dtype)
+        
+        if self.use_postfnochannel_mlp:
+            self.channel_mlp = MLP(mode='linear',
+                                   n_layers=2,
+                                   n_dims=dim,
+                                   in_channels=dv,
+                                   out_channels=dv,
+                                   hidden_channels=2*dv,
+                                   dtype=dtype
+                                )
+
  
     def forward(self, x, transform):
         """
@@ -197,12 +222,20 @@ class DSELayer(nn.Module):
         """
         # _dump_tensor(f"x_init", x)
         v = self.conv(x, transform)
+        if self.use_postfnochannel_mlp: # MLP
+            v1 = self.channel_mlp(v.permute(0,2,1))
+            v = v + v1.permute(0,2,1)
         # _dump_tensor("v",v)
 
         w = self.W(x)
         # _dump_tensor("w",w)
 
-        o = self.sigma(v+w)
+        v = v + w
+        if self.use_skip_connection:     # skip
+            s = self.skip(x)
+            v = v + s
+
+        o = self.sigma(v)
         # _dump_tensor("o",o)
 
         return o
