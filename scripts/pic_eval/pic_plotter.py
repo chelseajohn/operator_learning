@@ -85,13 +85,16 @@ class PICVisualizer:
             self.Q = self.L[0] * self.L[1] * self.L[2] / (self.QM * self.N)  
             self.rho_back = - self.Q * self.N / (self.L[0] * self.L[1] * self.L[2])
        
-        # here there is a redundant generation of full initial conditions on each rank... will need to change the sampling function
-        # so that it accepts shard_start and end, and also advance the RNG state properly so the sharded output is the same as thisu nsharded...
-        xp0_full, vp0_full = inv_trans_sampling_gpu(alpha=self.alpha, k=self.kn, L=self.Ln, N=self.N, dim=self.dim, label=self.testCase, ref=self.ref)
-        self.xp0_full = xp0_full.copy()   # full 100000, same on every rank, need for reference PIF run
-        self.vp0_full = vp0_full.copy()
-        self.xp0 = xp0_full[:, self.shard_start:self.shard_end].copy()
-        self.vp0 = vp0_full[:, self.shard_start:self.shard_end].copy()
+        # full array of initial conditions is only needed for the reference solver
+        # otherwise each GPU can only store its local shard of initial conditions
+        if args.predOnly == False:
+            xp0_full, vp0_full = inv_trans_sampling_gpu(alpha=self.alpha, k=self.kn, L=self.Ln, N=self.N, dim=self.dim, label=self.testCase, ref=self.ref)
+            self.xp0_full = xp0_full.copy()
+            self.vp0_full = vp0_full.copy()
+            self.xp0 = xp0_full[:, self.shard_start:self.shard_end].copy()
+            self.vp0 = vp0_full[:, self.shard_start:self.shard_end].copy()
+        else:
+            self.xp0, self.vp0 = inv_trans_sampling_gpu(alpha=self.alpha, k=self.kn, L=self.Ln, N=self.N_local, dim=self.dim, label=self.testCase, ref=self.ref)
 
         print(f"[tp_rank {tp_rank}/{tp_size}] Initial conditions done: particles [{self.shard_start}, {self.shard_end}), xp0 shape {self.xp0.shape}")
         # Set matplotlib defaults (better figures)

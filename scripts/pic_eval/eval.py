@@ -102,9 +102,9 @@ tp_size = args.tp_size
 # inference particle sharding
 if tp_size > 1:
     assert world_size == tp_size, f"tp_size={tp_size} must be the same as WORLD_SIZE={world_size}"
-    
+    gpus_per_node = config.parallel_strategy.get('gpus_per_node', 4)
     infer_parallel_strategy = {
-        "gpus_per_node": int(os.getenv('GPUS_PER_NODE', '4')),
+        "gpus_per_node": gpus_per_node,
         "ddp": True,
         "tp": True,
         "tp_size": tp_size,
