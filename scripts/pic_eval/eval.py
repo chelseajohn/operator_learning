@@ -90,11 +90,6 @@ device_name = torch.cuda.get_device_name(0) if device == 'cuda' else 'CPU'
 checkpoint = args.checkpoint
 dim = args.dim
 predOnly = args.predOnly
-seed = 152
-torch.manual_seed(seed)
-np.random.seed(seed)
-cp.random.seed(seed)
-torch.cuda.manual_seed_all(seed)
 
 world_size = int(os.getenv('WORLD_SIZE', '1'))
 tp_size = args.tp_size
@@ -133,6 +128,11 @@ else:
     fno_model = None
     tp_rank, tp_size, tp_mesh = 0, 1, None
 
+seed = 152 + tp_rank * 100
+torch.manual_seed(seed)
+np.random.seed(seed)
+cp.random.seed(seed)
+torch.cuda.manual_seed_all(seed)
 
 for tc in config["testCases"]:
     args.__dict__.update(**config["testCases"][tc])
