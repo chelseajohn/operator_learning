@@ -170,14 +170,10 @@ class PICVisualizer:
             Ezp = []
 
         # Time tracking
-        # using time.time() records on the CPU. CUDA kernel launches are async.
-        # therefore, for example, doing model(inputs) and time.time() right after it
-        # just measures the launch overhead instead of the actual execution time of the kernel.
-        # using cuda.Stream.null.synchronize() right before timing would serialize the work.
-        # instead, use cp.cuda.Event, which are markers recorded on the GPU's instruction stream at specific points
-        # events are non-blocking, and only cp.cuda.get_elapsed_time() needs the events to have completed
+        # using CUDA Events instead of time.time() to measure kernel execution times instead of only their startup time
+        # (time.time() only measures CPU time)
         times_acc = []
-        # timing at 3 different times, after normalization, after the model returns the inference, and the very end.
+        # timing at 3 different places: after normalization, after the model returns the inference, and the very end.
         _ev_start, _ev_norm, _ev_model, _ev_end = [], [], [], []
 
         if((self.ref == 'pif') and (self.testCase != 'cyclotron')):
@@ -202,19 +198,12 @@ class PICVisualizer:
 
             # Acceleration
             if ml_acc and model is not None:
-                # the biggest culprit when timing the acceleration for the model
-                # all of these are kernels!
-                # so none are executed where they are writen in code, only queued up
-                # in CUDA's instruction queue
-                # so using time.time() here and then again directly after model(inputs)
-                # just records the enqueue times for all the calls between them, not the execution
                 e_start = cp.cuda.Event(); e_norm = cp.cuda.Event()
                 e_model = cp.cuda.Event(); e_end = cp.cuda.Event()
                 # .record() on an Event object inserts the record marker in the instruction queue
                 e_start.record()
 
                 inputs = xp[None, :, :].copy() # [batch=1, channel=dim, N_local]
-                #inputs[:, 0, :] = normalize_per_sample(inputs[:, 0, :])
                 
                 if self.tp_enabled:
                     inputs = normalize_per_sample_distributed(inputs, self.tp_mesh)

@@ -859,7 +859,7 @@ class FourierNeuralOperator:
         if self.DDP_enabled:
             if self.rank == 0:
                 full_checkpoint = torch.load(path, map_location=map_location, weights_only=False)
-                if modelOnly: # the checkpoint has at epoch250.pt 1 GB in model_state_dict, and 2 GB in optimizer_state_dict, never used during inference
+                if modelOnly: # the checkpoint has parameters used in inference in model_state_dict, and the optimizer state in optimizer_state_dict is never used during inference
                     checkpoint = {
                         'model': full_checkpoint['model'],
                         'model_state_dict': full_checkpoint['model_state_dict'],
@@ -868,7 +868,7 @@ class FourierNeuralOperator:
                         'epochs': full_checkpoint.get('epochs'),
                         'losses': full_checkpoint.get('losses'),
                     }
-                    del full_checkpoint   # drops the 2 GB of the rest
+                    del full_checkpoint   # drops the parts unused for inference
                 else:
                     checkpoint = full_checkpoint
             else:
