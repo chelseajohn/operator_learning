@@ -142,6 +142,17 @@ class FourierNeuralOperator:
             self.tp_mesh = None
             self.dp_group= None
 
+        # ozaki hook check
+        maps   = open("/proc/self/maps").read()
+        OZAKI  = "libgemmul8" in maps
+        if OZAKI:
+            print_rank0("GEMMul8 : ACTIVE")
+            for k, v in sorted(os.environ.items()):
+                if k.startswith("GEMMUL8"):
+                    print_rank0(f"{k}={v}")
+        else:
+            print_rank0("GEMMul8 : OFF")
+
         # Evaluation-only mode
         if eval_only:
             assert checkpoint is not None, "Checkpoint required for evaluation mode"
@@ -521,7 +532,7 @@ class FourierNeuralOperator:
                 f"Train Epoch {self.epochs} time [min]: {(end_epoch_time - start_epoch_time) / 60.0}")
         if self.benchmark:
             print_rank0(
-                    f"average TFLOPs = {total_flops * nBatches / (end_epoch_time - start_epoch_time) / 1e12}"
+                    f"Total TFLOPs per epoch = {total_flops * nBatches / (end_epoch_time - start_epoch_time) / 1e12}"
                 )
 
     def valid(self):
@@ -668,7 +679,6 @@ class FourierNeuralOperator:
             train_time = []
             monitor_time = []
             checkpoint_time = []
-            compile_times = []
             mode_name = "Compiled" if self.compile else "Eager"
 
         # torch.compile
@@ -696,16 +706,35 @@ class FourierNeuralOperator:
                 print_rank0("NSYS Profiling Started...")
                 torch.cuda.cudart().cudaProfilerStart()
 
-            t0_comp = time.perf_counter()
+            # --------------------------------------------------------- 
+            # GPU training timer
+            # ---------------------------------------------------------
+            train_start = torch.cuda.Event(enable_timing=True) 
+            train_end = torch.cuda.Event(enable_timing=True)
+            
+            train_start.record()
+            train_fn()
+            train_end.record()
+            train_end.synchronize()
+
+            t_train = train_start.elapsed_time(train_end) / 1000.0  # time in sec
+
             if self.benchmark:
-                _, compile_time = compile_timing(lambda: train_fn())
-                compile_times.append(compile_time)
-                print_rank0(f"{mode_name} train time (epoch {i}): {compile_time:.4f}s")
-            else:
-                train_fn()
-            t_train = time.perf_counter() - t0_comp
+                print_rank0(f"{mode_name} train time (epoch {i}): {t_train:.4f}s")
+
+            # ---------------------------------------------------------
+            # GPU validation timer
+            # --------------------------------------------------------- 
+            valid_start = torch.cuda.Event(enable_timing=True) 
+            valid_end = torch.cuda.Event(enable_timing=True) 
+
+            valid_start.record() 
             self.valid()
-            t_comp = time.perf_counter() - t0_comp
+            valid_end.record() 
+            valid_end.synchronize() 
+
+            t_valid = valid_start.elapsed_time(valid_end) / 1000.0 # time in sec
+            t_comp = t_train + t_valid
             self.tCompEpoch = t_comp
 
             t0_monit = time.perf_counter()
@@ -755,13 +784,12 @@ class FourierNeuralOperator:
             total_train_samples = num_epochs * len(self.trainLoader.dataset)
             samples_per_sec_train = int(total_train_samples/total_train_time)
             samples_per_sec = int(total_samples/total_compute_time)
-            compile_time_mean = mean(compile_times[1:]) # not including first epoch
 
             data = {
                 "Metric": ["NumEpochs", "TotalEpochTime (s)",
                             "TotalMonitorTime (s)", "TotalCheckpointTime (s)",
                             "TotalComputeTime (s)","TotalTrainTime (s)",
-                            "MeanCompileTime (s)", "TotalTrainTimesteps",
+                            "TotalTrainTimesteps",
                             "TotalTimesteps", "TrainTimesteps/s",
                             "Timesteps/s"],
                 "Value": [  round(num_epochs,0),
@@ -770,7 +798,6 @@ class FourierNeuralOperator:
                             round(total_checkpoint_time, 3),
                             round(total_compute_time, 3),
                             round(total_train_time, 3),
-                            round(compile_time_mean, 3),
                             round(total_train_samples, 0),
                             round(total_samples, 0),
                             round(samples_per_sec_train, 0),

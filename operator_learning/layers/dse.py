@@ -58,12 +58,12 @@ class SpectralConv_dse(nn.Module):
     
     def compl_mul(self, input, weights):
         """
-        PIC1D: input[batchsize, dv, kX], weights[dv, dv, kX]
-        PIC2D: input[batchsize, dv, kX, kY], weights[dv, dv, kX, kY]
-        PIC3D: input[batchsize, dv, kX, kY, kZ], weights[dv, dv, kX, kY, kZ]
-        Returns PIC1D: [batchsize, dv, kX]
-        Returns PIC2D: [batchsize, dv, kX, kY]
-        Returns PIC3D: [batchsize, dv, kX, kY, kZ]
+        PIC1D: input[batchsize, dv, 2*kX], weights[dv, dv, 2*kX]
+        PIC2D: input[batchsize, dv, 2*kX, 2*kY], weights[dv, dv, 2*kX, 2*kY]
+        PIC3D: input[batchsize, dv, 2*kX, 2*kY, 2*kZ], weights[dv, dv, 2*kX, 2*kY, 2*kZ]
+        Returns PIC1D: [batchsize, dv, 2*kX]
+        Returns PIC2D: [batchsize, dv, 2*kX, 2*kY]
+        Returns PIC3D: [batchsize, dv, 2*kX, 2*kY, 2*kZ]
         """
         
         if self.training and self.use_complex_amp:
@@ -118,7 +118,7 @@ class SpectralConv_dse(nn.Module):
 
             
         if self.dim == 1:
-            out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, kX]
+            out_ft = self.compl_mul(x_ft, self.R)  # [batchsize, dv, 2*kX]
         elif self.dim == 2:
             x_ft = torch.reshape(x_ft, (batchsize, self.channel, 2*self.kX, 2*self.kY))  # [batchsize, dv, 2*kX, 2*kY]
             out_ft = self.compl_mul(x_ft, self.R)

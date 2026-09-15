@@ -123,7 +123,7 @@ def main(args):
 
     model = FourierNeuralOperator(**configs, checkpoint=args.checkpoint, debug=False,\
                                 benchmark=benchmark, use_amp=use_amp, use_complex_amp=use_complex_amp, \
-                                compile=compile, compile_mode=compile_mode, model_dtype=model_dtype,
+                                compile=compile, compile_mode=compile_mode, model_dtype=model_dtype, \
                                 fno_dtype=fno_dtype)
     model.learn(args.epochs, args.saveInterval)
 
