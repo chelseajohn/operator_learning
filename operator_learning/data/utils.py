@@ -55,7 +55,8 @@ def getDataLoaders(dataFile,
                    use_minLimit=False,
                    padding=[0,0,0,0], 
                    add_fullGrid=False, # to include full grid with domain grids
-                   dp_size=1,tp_size=1, tp_rank=0,
+                   dp_size=1,tp_size=1, 
+                   tp_rank=0,
                    **kwargs):
 
     if sampling_mode is not None:

@@ -63,7 +63,8 @@ parser.add_argument(
     help="FNO_DSE Layer dtype, options['float32', 'float64'] ")
 parser.add_argument(
     "--tp_size", type=int, default=1,
-    help="input particle sharding for inference, default 1 = no parallelism. Must equal WORLD_SIZE when launched with torchrun")
+    help="input particle sharding for inference,\
+    default 1 = no parallelism. Must equal WORLD_SIZE when launched with torchrun")
 parser.add_argument(
     "--config", default=None, help="configuration file")
 args = parser.parse_args()
