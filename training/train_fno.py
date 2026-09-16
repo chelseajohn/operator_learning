@@ -6,7 +6,6 @@ from collections import OrderedDict
 from statistics import mean
 import torch
 import torch.distributed as dist
-import cupy as cp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.utils.tensorboard import SummaryWriter
@@ -340,17 +339,7 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
-                    if self.dataClass != 'pic':
-                        dim = data[0].shape[1]
-                        x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
-                        if dim > 1:
-                            y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
-                        else:
-                            y_pos_min, y_pos_max = None, None
-                        if dim > 2:
-                            z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
-                        else:
-                            z_pos_min, z_pos_max = None, None
+                   
                 if self.dataClass == 'pic':
                     #data[0] and data[1] already contain this rank's particle shard
                     #(slicing in PICDataset.sample())
@@ -558,17 +547,7 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
-                    if self.dataClass != 'pic':
-                        dim = data[0].shape[1]
-                        x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
-                        if dim > 1:
-                            y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
-                        else:
-                            y_pos_min, y_pos_max = None, None
-                        if dim > 2:
-                            z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
-                        else:
-                            z_pos_min, z_pos_max = None, None
+                    
                 if self.dataClass == 'pic':
                     # sharding particles across tp ranks
                     inp = data[0].to(self.device)
@@ -944,8 +923,12 @@ class FourierNeuralOperator:
     def __call__(self, u0, nEval=1):
         # enable_tf32_only_on_a100()
         model = self.model.eval()
-        #inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
-        inpt = torch.from_dlpack(u0.toDlpack()).to(dtype=self.model_dtype) # This uses DLpack, zero-copy, instead of using torch.tensor() 
+
+        if self.device == 'cpu':
+            inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
+        else:
+            import cupy as cp
+            inpt = torch.from_dlpack(u0.toDlpack()).to(dtype=self.model_dtype) # This uses DLpack, zero-copy, instead of using torch.tensor() 
                                                                                     # which on a CuPy array calls .get(), so its GPU to CPU back to GPU
 
         with torch.no_grad():
@@ -956,9 +939,9 @@ class FourierNeuralOperator:
                     outp += inpt
                 inpt = outp
 
-        # u1 = outp.cpu().detach().numpy()
+        
         if outp.is_cuda:
             u1 = cp.from_dlpack(outp.detach())
         else:
-            u1 = cp.array(outp.detach().numpy())  # CPU eval
+            u1 = outp.cpu().detach().numpy()
         return u1
