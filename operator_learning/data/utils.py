@@ -55,7 +55,8 @@ def getDataLoaders(dataFile,
                    use_minLimit=False,
                    padding=[0,0,0,0], 
                    add_fullGrid=False, # to include full grid with domain grids
-                   dp_size=1,tp_size=1,
+                   dp_size=1,tp_size=1, 
+                   tp_rank=0,
                    **kwargs):
 
     if sampling_mode is not None:
@@ -75,7 +76,7 @@ def getDataLoaders(dataFile,
                 dataset.patch_startIdx.append((0,0))
     else:
         if kwargs.get('dataClass') == 'pic':
-            dataset = PICDataset(dataFile, **kwargs)
+            dataset = PICDataset(dataFile, tp_rank=tp_rank, tp_size=tp_size, **kwargs)
         else:
             dataset = RBCDataset(dataFile, **kwargs)
 

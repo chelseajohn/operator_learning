@@ -144,7 +144,7 @@ class SpectralConv_dse(nn.Module):
             x = x + self.bias
         # _dump_tensor("x_bias", x)
 
-        return x.real
+        return x.real.contiguous()
 
 
 class DSELayer(nn.Module):
