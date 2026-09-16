@@ -303,7 +303,7 @@ class FNO(nn.Module):
 
         x = x.permute(0,2,1)
         x = self.P(x)
-        x = x.permute(0,2,1)
+        x = x.permute(0,2,1).contiguous()  # for torch.einsum
         # _dump_tensor("p", x)
 
         for index,layer in enumerate(self.layers):
@@ -312,7 +312,7 @@ class FNO(nn.Module):
           
         x = x.permute(0,2,1)
         x = self.Q(x)
-        x = x.permute(0,2,1)
+        x = x.permute(0,2,1).contiguous()  # for torch.einsum
         # _dump_tensor("q", x)
 
         return x

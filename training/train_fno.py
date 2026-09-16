@@ -6,7 +6,6 @@ from collections import OrderedDict
 from statistics import mean
 import torch
 import torch.distributed as dist
-import cupy as cp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.utils.tensorboard import SummaryWriter
@@ -103,6 +102,7 @@ class FourierNeuralOperator:
             self.dp_size = 1
             self.effective_dp_size = 1
             self.tp_mesh = None
+            self.shard_idx = 0
     
             if self.DDP_enabled or self.TP_enabled:
                 self.communicator = Communicator(gpus_per_node, self.rank)
@@ -141,6 +141,7 @@ class FourierNeuralOperator:
             self.tp_size = 1
             self.tp_mesh = None
             self.dp_group= None
+            self.shard_idx = 0 
 
         # ozaki hook check
         maps   = open("/proc/self/maps").read()
@@ -181,7 +182,8 @@ class FourierNeuralOperator:
                                                                         **self.data_config,
                                                                          kX=model['kX'], kY=model['kY'], 
                                                                          kZ=model['kZ'], dp_size=self.effective_dp_size,
-                                                                         tp_size=self.tp_size, accum_steps=self.accum_steps
+                                                                         tp_size=self.tp_size, tp_rank=self.shard_idx,
+                                                                         accum_steps=self.accum_steps
                                                                         )
         print_rank0(f"Using gradient accumulation in steps of {self.accum_steps} with local batchsize {self.trainLoader.batch_size}")
         self.outType = self.dataset.outType
@@ -348,30 +350,23 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
-                    dim = data[0].shape[1]
-                    x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
-                    if dim > 1:
-                        y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
-                    else:
-                        y_pos_min, y_pos_max = None, None
-                    if dim > 2:
-                        z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
-                    else:
-                        z_pos_min, z_pos_max = None, None
+                   
                 if self.dataClass == 'pic':
+                    #data[0] and data[1] already contain this rank's particle shard
+                    #(slicing in PICDataset.sample())
+                    inp = data[0].to(self.device)
+                    ref = data[1].to(self.device)
                     # sharding particles across tp ranks
+                    dim = inp.shape[1]
+                    pos_min = torch.amin(inp, dim=(0,2)) #[dim]
+                    pos_max = torch.amax(inp, dim=(0,2))
                     if self.TP_enabled:
-                        nParticles = data[0].shape[-1]
-                        particles_per_tp = nParticles //self.tp_size
-                        start = self.shard_idx * particles_per_tp
-                        end = start + particles_per_tp
-                        # print(f'Train [Rank {self.rank}]: start_idx={start}, end_idx={end}')
-                    else:
-                        start = 0
-                        end = None
-
-                    inp = data[0][:,:, start:end].to(self.device)
-                    ref = data[1][:,:, start:end].to(self.device)
+                        tp_group = self.tp_mesh.get_group()
+                        dist.all_reduce(pos_min, op=dist.ReduceOp.MIN, group=tp_group)
+                        dist.all_reduce(pos_max, op=dist.ReduceOp.MAX, group=tp_group)
+                    x_pos_min, x_pos_max = pos_min[0], pos_max[0]
+                    y_pos_min, y_pos_max = (pos_min[1], pos_max[1]) if dim > 1 else (None, None)
+                    z_pos_min, z_pos_max = (pos_min[2], pos_max[2]) if dim > 2 else (None, None)
                 else:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
@@ -563,30 +558,22 @@ class FourierNeuralOperator:
                     data = (inp_list[iBatch], out_list[iBatch])
                 else:
                     data = next(data_iter)
-                    dim = data[0].shape[1]
-                    x_pos_min, x_pos_max = torch.min(data[0][:, 0, :]), torch.max(data[0][:, 0, :])
-                    if dim > 1:
-                        y_pos_min, y_pos_max =  torch.min(data[0][:, 1, :]), torch.max(data[0][:, 1, :])
-                    else:
-                        y_pos_min, y_pos_max = None, None
-                    if dim > 2:
-                        z_pos_min, z_pos_max =  torch.min(data[0][:, 2, :]), torch.max(data[0][:, 2, :])
-                    else:
-                        z_pos_min, z_pos_max = None, None
+                    
                 if self.dataClass == 'pic':
                     # sharding particles across tp ranks
+                    inp = data[0].to(self.device)
+                    ref = data[1].to(self.device)
+                    dim = inp.shape[1]
+                    pos_min = torch.amin(inp, dim=(0,2))
+                    pos_max = torch.amax(inp, dim=(0,2))
                     if self.TP_enabled:
-                        nParticles = data[0].shape[-1]
-                        particles_per_tp = nParticles //self.tp_size
-                        start = self.shard_idx * particles_per_tp
-                        end = start + particles_per_tp
+                        tp_group = self.tp_mesh.get_group()
+                        dist.all_reduce(pos_min, op=dist.ReduceOp.MIN, group=tp_group)
+                        dist.all_reduce(pos_max, op=dist.ReduceOp.MAX, group=tp_group)
                         # print(f'[Rank {self.rank}]: start_idx={start}, end_idx={end}')
-                    else:
-                        start = 0
-                        end = None
-
-                    inp = data[0][:,:, start:end].to(self.device)
-                    ref = data[1][:,:, start:end].to(self.device)
+                    x_pos_min, x_pos_max = pos_min[0], pos_max[0]
+                    y_pos_min, y_pos_max = (pos_min[1], pos_max[1]) if dim > 1 else (None, None)
+                    z_pos_min, z_pos_max = (pos_min[2], pos_max[2]) if dim > 2 else (None, None)
                 else:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
@@ -872,7 +859,31 @@ class FourierNeuralOperator:
             map_location = {f'cuda:0': f'{self.device}'}
         else:
             map_location = self.device
-        checkpoint = torch.load(self.fullPath(filename), map_location=map_location, weights_only=False)
+
+        path = self.fullPath(filename)
+
+        if self.DDP_enabled:
+            if self.rank == 0:
+                full_checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+                if modelOnly: # the checkpoint has parameters used in inference in model_state_dict, and the optimizer state in optimizer_state_dict is never used during inference
+                    checkpoint = {
+                        'model': full_checkpoint['model'],
+                        'model_state_dict': full_checkpoint['model_state_dict'],
+                        'outType': full_checkpoint['outType'],
+                        'outScaling': full_checkpoint['outScaling'],
+                        'epochs': full_checkpoint.get('epochs'),
+                        'losses': full_checkpoint.get('losses'),
+                    }
+                    del full_checkpoint   # drops the parts unused for inference
+                else:
+                    checkpoint = full_checkpoint
+            else:
+                checkpoint = None
+            obj_list = [checkpoint]
+            dist.broadcast_object_list(obj_list, src=0, device=self.device)
+            checkpoint = obj_list[0]
+        else:
+            checkpoint = torch.load(path, map_location=map_location, weights_only=False)
 
         if hasattr(self, "modelConfig") and self.modelConfig != checkpoint['model']:
             for key, value in self.modelConfig.items():
@@ -939,7 +950,13 @@ class FourierNeuralOperator:
     def __call__(self, u0, nEval=1):
         # enable_tf32_only_on_a100()
         model = self.model.eval()
-        inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
+
+        if self.device == 'cpu':
+            inpt = torch.tensor(u0, device=self.device, dtype=torch.get_default_dtype())
+        else:
+            import cupy as cp
+            inpt = torch.from_dlpack(u0.toDlpack()).to(dtype=self.model_dtype) # This uses DLpack, zero-copy, instead of using torch.tensor() 
+                                                                                    # which on a CuPy array calls .get(), so its GPU to CPU back to GPU
 
         with torch.no_grad():
             for _ in range(nEval):
@@ -949,9 +966,9 @@ class FourierNeuralOperator:
                     outp += inpt
                 inpt = outp
 
-        # u1 = outp.cpu().detach().numpy()
+        
         if outp.is_cuda:
             u1 = cp.from_dlpack(outp.detach())
         else:
-            u1 = cp.array(outp.detach().numpy())  # CPU eval
+            u1 = outp.cpu().detach().numpy()
         return u1
