@@ -1,5 +1,5 @@
 """
-Test: VandermondeTransformMatrixFree + Spectral GEMM
+Test: VandermondeTransformMatrixFree + Spectral Complex GEMM
       with and without Ozaki Scheme II (GEMMul8 INT8 hook)
 
 Run without GEMMul8 (saves baseline tensors):
@@ -10,7 +10,7 @@ Run with GEMMul8 INT8 hook (compares against saved baseline):
     GEMMUL8_BACKEND_GEMM=INT8                        \
     GEMMUL8_NUM_MOD_Z_GEMM=13                        \
     GEMMUL8_FASTMODE_Z_GEMM=1                        \
-    python test_ozaki_hook.py --load baseline.pt
+    python test_ozaki_hook_CGEMM.py --load baseline.pt
 
 """
 

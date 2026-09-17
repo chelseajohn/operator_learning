@@ -51,7 +51,7 @@ class FourierNeuralOperator:
         self.debug = debug
         self.benchmark = benchmark
         self.fno_dtype = fno_dtype
-        self.model_dtype = model_dtype   # FNO_DSE layer is kept in fno_dtype choose float32 or float64 for other layers
+        self.model_dtype = model_dtype   # FNO_DSE layer is kept in fno_dtype, choose float32 or float64 for other layers
         self.use_amp = use_amp
         self.use_complex_amp = use_complex_amp  # explicit casting to Float16 for complex numbers
         assert not (use_complex_amp and not use_amp), "use_complex_amp=True requires use_amp=True"
@@ -65,6 +65,7 @@ class FourierNeuralOperator:
             self.autocast_device_type = "cuda" if "cuda" in self.device else "cpu"
 
         if use_amp:
+            print_rank0(f'Using mixed precision FP32/FP16 only for real weights')
             self.scaler = torch.amp.GradScaler(self.autocast_device_type, enabled=use_amp)
         else:
             self.scaler = NoScale()
@@ -147,12 +148,12 @@ class FourierNeuralOperator:
         maps   = open("/proc/self/maps").read()
         OZAKI  = "libgemmul8" in maps
         if OZAKI:
-            print_rank0("GEMMul8 : ACTIVE")
+            print_rank0("OZAKI-II GEMMul8 : ACTIVE")
             for k, v in sorted(os.environ.items()):
                 if k.startswith("GEMMUL8"):
                     print_rank0(f"{k}={v}")
         else:
-            print_rank0("GEMMul8 : OFF")
+            print_rank0("OZAKI-II GEMMul8 : OFF")
 
         # Evaluation-only mode
         if eval_only:

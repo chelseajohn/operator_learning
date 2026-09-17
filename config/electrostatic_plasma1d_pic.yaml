@@ -38,10 +38,12 @@ model:
   channel_mlp_expansion: 4
   use_skip_connection: false
   skip_type: soft-gating
-  use_dse: true                         # Direct Spectral Evaluation
+  use_dse: false                        # Direct Spectral Evaluation (DSE)
+  matrix_free: false                    # DSE-matrix free
   use_kb: false                         # Kaiser-Bessel NUFFT
   use_toeplitz: false                   # Toeplitz NUFFT
-  matrix_free: false
+  use_finufft: true                     # Pytorch-Finufft
+  
 
 
 optim:
