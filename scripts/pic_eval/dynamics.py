@@ -92,26 +92,23 @@ def push(vp: cp.ndarray, a: cp.ndarray,
         kinetic_energy (float): Kinetic energy after update.
     """
     if it == 0:
-        if(testCase == 'cyclotron'):
-            Ek = kinetic(vp, Q, QM, wp)
-            vp = vp + DT * (a + QM * cp.cross(vp, B0, axisa=0)[:, 0:2].T) / 2
-            return vp, Ek
-        else:
-            #return vp + a * DT / 2, kinetic(vp + a * DT / 2, Q, QM, wp)
-            return vp + a * DT / 2, kinetic(vp, Q, QM, wp)
-
+        DT_eff = DT / 2
     else:
-        if(testCase == 'cyclotron'):
-            Vm = vp + a * DT / 2
-            Vprime = Vm + cp.cross(Vm, B0, axisa=0)[:, 0:2].T * QM * DT / 2
-            Vp = Vm + cp.cross(Vprime, B0, axisa=0)[:, 0:2].T * QM * DT / (1 + (cp.linalg.norm(B0)*QM*DT/2) ** 2)
-            new_vp = Vp + a * DT / 2
-            Ek = kinetic((vp + new_vp) / 2, Q, QM, wp)
-            vp = new_vp
-            return vp, Ek
-        else:
-            #return vp + a * DT, kinetic(vp + a * DT, Q, QM, wp)
-            return vp + a * DT, kinetic((vp + (vp + a * DT))/2, Q, QM, wp)
+        DT_eff = DT
+    
+    if(testCase == 'cyclotron'):
+        Vm = vp + a * DT_eff / 2
+        Vprime = Vm + cp.cross(Vm, B0, axisa=0)[:, 0:2].T * QM * DT_eff / 2
+        Vp = Vm + cp.cross(Vprime, B0, axisa=0)[:, 0:2].T * QM * DT_eff / (1 + (cp.linalg.norm(B0)*QM*DT_eff/2) ** 2)
+        new_vp = Vp + a * DT_eff / 2
+    else:
+        new_vp = vp + a * DT_eff
+
+    if it == 0:
+        return new_vp, kinetic(vp, Q, QM, wp)
+    else:
+        return new_vp, kinetic((vp + new_vp)/2, Q, QM, wp)
+
 
 
 def move(xp: cp.ndarray, vp: cp.ndarray,

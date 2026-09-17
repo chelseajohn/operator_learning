@@ -145,16 +145,7 @@ def scatterFourier(XP, SHat, NG, N, Q, L, dim, testCase, wp=1):
                     n_modes=(2*NG,2*NG),
                     eps=1e-12,
                     isign=-1,
-                    modeord=1) / (L[0] * L[1])
-            #rhoHat = Q * SHat[::2,::2] * (cufinufft.nufft2d1(
-            #        XP[0] * cp.pi / L[0],
-            #        XP[1] * cp.pi / L[1],
-            #        0j + cp.zeros(N) + wp,
-            #        n_modes=(2*NG,2*NG),
-            #        eps=1e-12,
-            #        isign=-1,
-            #        modeord=1)) / (L[0] * L[1])
-
+                    modeord=1) / ((2 * L[0]) * (2 * L[1]))
         else:
             rhoHat = Q * SHat * (cufinufft.nufft2d1(
                     XP[0] * 2 * cp.pi / L[0],
