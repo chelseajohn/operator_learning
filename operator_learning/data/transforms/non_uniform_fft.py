@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from torchkbnufft import KbNufft, KbNufftAdjoint, ToepNufft, calc_toeplitz_kernel
+import pytorch_finufft as fin
 
 class NUFFTTransform:
     """
@@ -21,6 +22,7 @@ class NUFFTTransform:
         self.dim = dim
         self.transform = transform
         self.dtype = dtype
+        self.dataClass = dataClass
 
 
     def build_ktraj_from_particles(self, np):
@@ -80,3 +82,110 @@ class NUFFTTransform:
         return data_inv.reshape(b,c,p)
 
   
+class Finufft:
+    """ 
+    Supports 1D/2D/3D spatial transforms over non-uniform 
+    particle positions using pytorch finufft
+    """
+    def __init__(self, x_positions, kX, x_pos_min=None, x_pos_max=None,
+                 y_positions=None, kY=None, y_pos_min=None, y_pos_max=None,
+                 z_positions=None, kZ=None, z_pos_min=None, z_pos_max=None,
+                 dim=1, device='cuda', dtype=torch.float32):
+        
+        self.device = device
+        assert dim in (1, 2, 3), "dim must be 1 or 2 or 3"
+        self.dim = dim
+        self.kX = 2*kX
+        if x_pos_min is None:
+            x_pos_min = torch.min(x_positions) 
+        if x_pos_max is None:
+            x_pos_max = torch.max(x_positions)
+        x_positions = x_positions - x_pos_min              
+        self.x_positions = x_positions * 2*torch.pi /  x_pos_max 
+        self.batch_size = x_positions.shape[0]
+        self.number_points = x_positions.shape[1]
+        self.dtype = dtype
+      
+        if dim > 1:  
+            if y_pos_min is None:
+                y_pos_min = torch.min(y_positions) 
+            if y_pos_max is None:
+                y_pos_max = torch.max(y_positions)
+            self.kY = 2*kY if kY is not None else 2*kX
+            y_positions = y_positions - y_pos_min              
+            self.y_positions = y_positions * 2*torch.pi /y_pos_max  
+           
+        if dim > 2:
+            if z_pos_min is None:
+                z_pos_min = torch.min(z_positions) 
+            if z_pos_max is None:
+                z_pos_max = torch.max(z_positions)
+            self.kZ = 2*kZ if kZ is not None else 2*kX
+            z_positions = z_positions - z_pos_min                          
+            self.z_positions = z_positions * 2*torch.pi / z_pos_max             
+            
+
+    def _get_pts(self, t):
+        """Get spatial coordinate tuple for timestep t."""
+        if self.dim == 1:
+            return self.x_positions[t]
+        elif self.dim == 2:
+            return torch.stack((self.x_positions[t], self.y_positions[t]))
+        else:
+            return torch.stack((self.x_positions[t], self.y_positions[t], self.z_positions[t]))
+
+    @property
+    def _n_modes(self):
+        if self.dim == 1:
+            return (self.kX)
+        elif self.dim == 2:
+            return (self.kX, self.kY)
+        else:
+            return (self.kX, self.kY, self.kZ)
+
+    def _forward_single(self, pts, data_t):
+        """
+        pts:    (dim, N)
+        data_t: (dv, N) complex
+        returns (dv, modes_flat) complex
+        """
+        # finufft type1 with batched sources: values (dv, N) -> output (dv, *n_modes)
+        out = fin.functional.finufft_type1(pts, data_t, self._n_modes)
+        return out.reshape(data_t.shape[0], -1)  # (dv, modes_flat)
+
+    def _inverse_single(self, pts, data_t):
+        """
+        pts:    (dim, N)
+        data_t: (dv, modes_flat) complex
+        returns (dv, N) complex
+        """
+        grid = data_t.reshape(data_t.shape[0], *self._n_modes)  # (dv, *n_modes)
+        out = fin.functional.finufft_type2(pts, grid,)
+        return out  # (dv, N)
+
+    def forward(self, data):
+        """
+        data: (batch, dv, nParticle) 
+        returns: (batch, dv, modes_flat) 
+            modes_flat = 2*kX for 1D
+                       = 2*kX * 2*kY for 2D
+                       = 2*kX * 2*kY * 2*kZ for 3D
+        """
+        if data.device.type != self.device:
+            data = data.to(self.device)
+        results = []
+        for t in range(self.batch_size):
+            pts = self._get_pts(t)
+            results.append(self._forward_single(pts, data[t]))
+        return torch.stack(results)  # (batch, dv, modes_flat)
+
+    def inverse(self, data):
+        """
+        data: (batch, dv, modes_flat) complex
+        returns: (batch, dv, nParticle) complex
+        """
+        results = []
+        for t in range(self.batch_size):
+            pts = self._get_pts(t)
+            results.append(self._inverse_single(pts, data[t]))
+        return torch.stack(results)  # (batch, dv, nParticle)

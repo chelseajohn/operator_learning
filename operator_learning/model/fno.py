@@ -10,6 +10,7 @@ from operator_learning.utils.misc import print_rank0, _dump_tensor
 from operator_learning.layers import SpectralConv, SkipConnection, GridLinear, MLP, DSELayer, NUFFTLayer
 from operator_learning.data.transforms.vandermonde import VandermondeTransform
 from operator_learning.data.transforms.vandermonde_matrix_free import VandermondeTransformMatrixFree
+from operator_learning.data.transforms.non_uniform_fft import Finufft, NUFFTTransform
 
 class FNOLayer(nn.Module):
 
@@ -19,7 +20,7 @@ class FNOLayer(nn.Module):
                  n_dims=2,
                  use_skip_connection=False, 
                  use_postfnochannel_mlp=False,
-                 skip_type='linear',
+                 skip_type='conv',
                  use_complex_amp=False
                  ):
         super().__init__()
@@ -99,10 +100,11 @@ class FNO(nn.Module):
                  use_postfnochannel_mlp=False,
                  channel_mlp_expansion=4,
                  use_skip_connection=False, 
-                 skip_type='linear',
+                 skip_type='conv',
                  use_dse=False,
                  use_toeplitz=False,
                  use_kb=False,
+                 use_finufft=False,
                  dataset=None,
                  dataClass='pic',
                  use_complex_amp=False,
@@ -129,8 +131,10 @@ class FNO(nn.Module):
         self.use_toeplitz = use_toeplitz
         # KB implemented only for PIC1D 
         self.use_kb = use_kb 
-        assert sum([self.use_dse, self.use_toeplitz, self.use_kb]) <= 1, \
-            "Exactly one of use_dse, use_toeplitz, or use_kb must be True."
+        # Finufft
+        self.use_finufft = use_finufft
+        assert sum([self.use_dse, self.use_toeplitz, self.use_kb, self.use_finufft]) <= 1, \
+            "Exactly one of use_dse, use_toeplitz, use_finufft or use_kb must be True."
 
         self.dataClass = dataClass
         self.dataset = dataset if dataClass == 'rbc' else None
@@ -138,9 +142,21 @@ class FNO(nn.Module):
         self.tp_mesh = kwargs.get("tp_mesh", None)
         self.matrix_free = matrix_free
         self.fno_dtype = fno_dtype
-        print_rank0(f"Using {self.data_type} for P and Q layers and {self.fno_dtype} for DSE Layer")
 
         if use_dse:
+            transform_method = "Vandermonde transform" + (" (matrix-free)" if matrix_free else "")
+        elif use_finufft:
+            transform_method = "Finufft"
+        elif use_kb:
+            transform_method = "Kaiser-Bessel-NUFFT"
+        elif use_toeplitz:
+            transform_method = "Toeplitz-NUFFT"
+
+        print_rank0(f"Using {transform_method}")
+        print_rank0(f"Using {self.data_type} for P and Q layers and {self.fno_dtype} for DSE Layer")
+        
+
+        if use_dse or use_finufft:
             self.layers = nn.ModuleList(
                 [DSELayer(dv=dv,
                           kX=kX, kY=kY, kZ=kZ, dataClass=dataClass,
@@ -150,18 +166,21 @@ class FNO(nn.Module):
                           use_complex_amp=use_complex_amp,
                           tp_mesh=self.tp_mesh,
                           dtype=self.fno_dtype,  # FP64 necessary for input sharding
+                          use_skip_connection=use_skip_connection, 
+                          use_postfnochannel_mlp=use_postfnochannel_mlp,
+                          skip_type=skip_type,
                          )
                  for _ in range(n_layers)])
-        # elif use_toeplitz:
-        #     from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
-        #     self.layers = nn.ModuleList(
-        #         [NUFFTLayer(dv=dv, 
-        #                   kX=kX, dataClass=dataClass,
-        #                   non_linearity=non_linearity,
-        #                   bias=bias,
-        #                   dim=n_dims,
-        #                   use_complex_amp=use_complex_amp)
-        #          for _ in range(n_layers)])
+        elif use_toeplitz:
+            from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
+            self.layers = nn.ModuleList(
+                [NUFFTLayer(dv=dv, 
+                          kX=kX, dataClass=dataClass,
+                          non_linearity=non_linearity,
+                          bias=bias,
+                          dim=n_dims,
+                          use_complex_amp=use_complex_amp)
+                 for _ in range(n_layers)])
         elif use_kb:
             from operator_learning.data.transforms.non_uniform_fft import NUFFTTransform
             self.layers = nn.ModuleList(
@@ -201,7 +220,7 @@ class FNO(nn.Module):
                         dtype=self.data_type
                     )
        
-        self.memory = CudaMemoryDebugger(print_mem=True)
+        # self.memory = CudaMemoryDebugger(print_mem=True)
  
 
     def forward(self, x, x_pos_min=None, x_pos_max=None,
@@ -281,19 +300,59 @@ class FNO(nn.Module):
                                                         dtype=self.fno_dtype)
                 
 
-        # if self.use_toeplitz:
-        #     transform_coeff = NUFFTTransform(device=self.device,
-        #                                      dataClass='pic',
-        #                                      transform='toeplitz', 
-        #                                      dim=self.n_dims, 
-        #                                      dtype=self.data_type)
+        if self.use_finufft:
+            if self.n_dims == 1:
+                transform_coeff = Finufft(x_positions=x[:,0,:], 
+                                                       kX=self.kX, 
+                                                       x_pos_min=x_pos_min,
+                                                       x_pos_max=x_pos_max,
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.fno_dtype
+                                                        )
+            elif self.n_dims == 2:
+                transform_coeff = Finufft(x_positions=x[:,0,:], 
+                                                       y_positions=x[:,1,:],
+                                                       kX=self.kX, 
+                                                       kY=self.kY,
+                                                       x_pos_min=x_pos_min,
+                                                       x_pos_max=x_pos_max,
+                                                       y_pos_min=y_pos_min,
+                                                       y_pos_max=y_pos_max,
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.fno_dtype)
+            else:
+                transform_coeff = Finufft(x_positions=x[:,0,:], 
+                                                       y_positions=x[:,1,:],
+                                                       z_positions=x[:,2,:],
+                                                       kX=self.kX, 
+                                                       kY=self.kY,
+                                                       kZ=self.kZ,
+                                                       x_pos_min=x_pos_min,
+                                                       x_pos_max=x_pos_max,
+                                                       y_pos_min=y_pos_min,
+                                                       y_pos_max=y_pos_max,
+                                                       z_pos_min=z_pos_min,
+                                                       z_pos_max=z_pos_max,
+                                                       dim=self.n_dims,
+                                                       device=self.device,
+                                                       dtype=self.fno_dtype)
+              
+
+        if self.use_toeplitz:
+            transform_coeff = NUFFTTransform(device=self.device,
+                                             dataClass='pic',
+                                             transform='toeplitz', 
+                                             dim=self.n_dims, 
+                                             dtype=self.data_type)
         
-        # if self.use_kb:
-        #     transform_coeff = NUFFTTransform(device=self.device, 
-        #                                      dataClass='pic',
-        #                                      transform='kb', 
-        #                                      dim=self.n_dims, 
-        #                                      dtype=self.data_type)
+        if self.use_kb:
+            transform_coeff = NUFFTTransform(device=self.device, 
+                                             dataClass='pic',
+                                             transform='kb', 
+                                             dim=self.n_dims, 
+                                             dtype=self.data_type)
 
         if x.dtype is not self.data_type:
             x = x.to(self.data_type)
