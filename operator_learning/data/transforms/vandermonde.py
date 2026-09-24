@@ -23,7 +23,7 @@ class VandermondeTransform:
                              0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kX, 1]
 
         if dim == 1:
-            self.Vt, self.Vc = self.make_1Dmatrix()
+            self.Vt = self.make_1Dmatrix()
         elif dim == 2:
             self.kY = kY if kY is not None else kX
             y_positions = y_positions - torch.min(y_positions)
@@ -31,7 +31,7 @@ class VandermondeTransform:
             self.Y_ = torch.cat((torch.arange(self.kY, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kY), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kY, 1]
-            self.Vt, self.Vc = self.make_2Dmatrix()
+            self.Vt = self.make_2Dmatrix()
         else:
             self.kY = kY if kY is not None else kX
             self.kZ = kZ if kZ is not None else kZ
@@ -46,8 +46,7 @@ class VandermondeTransform:
                                  torch.arange(start=-(self.kZ), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kZ, 1]
             # print_rank0(f'Position shape: {x_positions.shape, y_positions.shape, z_positions.shape}')
-            self.Vt, self.Vc = self.make_3Dmatrix()
-
+            self.Vt = self.make_3Dmatrix()
 
     def make_1Dmatrix(self):
   
@@ -58,9 +57,8 @@ class VandermondeTransform:
 
             # flatten to [B, m, N]
             forward_mat = torch.exp(-1j * X)
-            inverse_mat = torch.conj(forward_mat)
-
-        return forward_mat, inverse_mat
+        
+        return forward_mat
               
             
     def make_2Dmatrix(self):
@@ -80,12 +78,11 @@ class VandermondeTransform:
 
             # flatten to [B, m, N]
             forward_mat = torch.exp(-1j * phase).reshape(self.batch_size, m, self.number_points)
-            inverse_mat = torch.conj(forward_mat)
             # X_mat = torch.bmm(self.X_, self.x_positions[:,None,:]).repeat(1, self.kY*2, 1).to(self.device)
             # Y_mat = (torch.bmm(self.Y_, self.y_positions[:,None,:]).repeat(1, 1, self.kX*2).reshape(self.batch_size,m,self.number_points)).to(self.device)
             # forward_mat = torch.exp(-1j* (X_mat+Y_mat)).to(dtype=torch.cfloat, device=self.device) # [batchsize, m, nParticles]
 
-        return forward_mat, inverse_mat
+        return forward_mat
     
     def make_3Dmatrix(self):
         
@@ -103,9 +100,8 @@ class VandermondeTransform:
 
             # flatten to [B, m, N]
             forward_mat = torch.exp(-1j * phase).reshape(self.batch_size, m, self.number_points)
-            inverse_mat = torch.conj(forward_mat)
 
-            return forward_mat, inverse_mat
+            return forward_mat
     
     def forward(self, data):
         """
@@ -136,9 +132,9 @@ class VandermondeTransform:
         # 1D: [batchsize, dv, kX] x [batchsize, kX, nParticle]
         # 2D/3D: [batchsize, dv, modes] x [batchsize, modes, nParticle]
         if data.dtype == torch.complex32:
-            data_inv = einsum_complexhalf('bck,bkp->bcp', data, self.Vc)
+            data_inv = einsum_complexhalf('bck,bkp->bcp', data, self.Vt.conj())
         else:
-            data_inv = torch.bmm(data, self.Vc) 
+            data_inv = torch.bmm(data, self.Vt.conj()) 
 
         return data_inv
         
