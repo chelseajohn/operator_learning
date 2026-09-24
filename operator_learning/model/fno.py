@@ -141,6 +141,7 @@ class FNO(nn.Module):
         self.data_type = torch.float16 if use_complex_amp and self.training else dtype  # For P & Q layers
         self.tp_mesh = kwargs.get("tp_mesh", None)
         self.matrix_free = matrix_free
+        self.decompose = kwargs.get("decompose", False)
         self.fno_dtype = fno_dtype
 
         if use_dse:
@@ -242,7 +243,8 @@ class FNO(nn.Module):
                                                        x_pos_max=x_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=self.fno_dtype
+                                                       dtype=self.fno_dtype,
+                                                       decompose=self.decompose
                                                         )
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
@@ -262,7 +264,8 @@ class FNO(nn.Module):
                                                        y_pos_max=y_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=self.fno_dtype)
+                                                       dtype=self.fno_dtype,
+                                                       decompose=self.decompose)
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                         y_positions=x[:,1,:],
@@ -287,7 +290,8 @@ class FNO(nn.Module):
                                                        z_pos_max=z_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
-                                                       dtype=self.fno_dtype)
+                                                       dtype=self.fno_dtype,
+                                                       decompose=self.decompose)
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                         y_positions=x[:,1,:],

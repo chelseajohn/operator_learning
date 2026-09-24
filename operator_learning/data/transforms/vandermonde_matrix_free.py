@@ -1,16 +1,20 @@
 import torch
-from operator_learning.utils.misc import einsum_complexhalf
+import torch.backends.opt_einsum
+from operator_learning.utils.misc import print_rank0
+torch.backends.opt_einsum.enabled = True
+torch.backends.opt_einsum.strategy = 'auto'  # auto, greedy, optimal, auto-hq
 
 class VandermondeTransformMatrixFree:
     """
-    Matrix-free 1D/2D/3D Fourier transforms on a nonequispaced lattice.
+    Matrix-free 1D/2D/3D Fourier transforms on a non-uniform lattice.
     """
     def __init__(self, x_positions, kX, x_pos_min=None, x_pos_max=None, 
                  y_positions=None, kY=None, y_pos_min=None, y_pos_max=None,
                  z_positions=None, kZ=None, z_pos_min=None, z_pos_max=None,
-                 dim=1, device='cuda', dtype=torch.float32):
+                 dim=1, device='cuda', dtype=torch.float32, decompose=False):
         self.device = device
         self.dtype = dtype
+        self.decompose = decompose
         assert dim in (1, 2, 3), "dim must be 1 or 2 or 3"
         self.dim = dim
         self.kX = kX
@@ -76,8 +80,13 @@ class VandermondeTransformMatrixFree:
         data: [batchsize, dv, nParticle]
         out:  [batchsize, dv, (2*kX)*(2*kY)]
         """
-    
-        out = torch.einsum("bcp,bkp,blp->bckl", data, self.Fx, self.Fy)
+
+        if self.decompose:
+            tmp = torch.einsum("bcp,bkp->bckp", data, self.Fx)       # (B, dv, 2kX, nP)
+            out = torch.einsum("bckp,blp->bckl", tmp, self.Fy)       # (B, dv, 2kX, 2kY)
+        else:
+            out = torch.einsum("bcp,bkp,blp->bckl", data, self.Fx, self.Fy)
+
         out = out.reshape(self.batch_size, data.shape[1], len(self.X_)*len(self.Y_))
         # print(f'data: {data.dtype}, Fx: {self.Fx.dtype}, Fy: {self.Fy.dtype}, FWD out: {out.dtype}', flush=True)
        
@@ -89,7 +98,11 @@ class VandermondeTransformMatrixFree:
         out:  [batchsize, dv, nParticle]
         """
         d = data.reshape(self.batch_size, data.shape[1], len(self.X_), len(self.Y_))
-        out = torch.einsum("bckl,bkp,blp->bcp", d, torch.conj(self.Fx), torch.conj(self.Fy)) 
+        if self.decompose:
+            tmp = torch.einsum("bckl,blp->bckp", d, self.Fy.conj())   # (B, dv, 2kX, nP)
+            out = torch.einsum("bckp,bkp->bcp", tmp, self.Fx.conj())  # (B, dv, nP)
+        else:
+            out = torch.einsum("bckl,bkp,blp->bcp", d, torch.conj(self.Fx), torch.conj(self.Fy)) 
         # print(f'BWD out: {out.dtype}, data: {data.dtype}, Fx: {self.Fx.dtype}, Fy: {self.Fy.dtype}', flush=True)
 
         return out
@@ -100,7 +113,12 @@ class VandermondeTransformMatrixFree:
         out:  [batchsize, dv, (2*kX)*(2*kY)*(2*kZ)]
         """
     
-        out = torch.einsum("bcp,bkp,blp,bmp->bcklm", data, self.Fx, self.Fy, self.Fz)
+        if self.decompose:
+            tmp = torch.einsum("bcp,bkp->bckp", data, self.Fx)         # (B, dv, 2kX, nP)
+            tmp = torch.einsum("bckp,blp->bcklp", tmp, self.Fy)        # (B, dv, 2kX, 2kY, nP)
+            out = torch.einsum("bcklp,bmp->bcklm", tmp, self.Fz)       # (B, dv, 2kX, 2kY, 2kZ)
+        else:
+            out = torch.einsum("bcp,bkp,blp,bmp->bcklm", data, self.Fx, self.Fy, self.Fz)
         out = out.reshape(self.batch_size, data.shape[1], len(self.X_)*len(self.Y_)*len(self.Z_))
 
         return out 
@@ -111,7 +129,12 @@ class VandermondeTransformMatrixFree:
         out:  [batchsize, dv, nParticle]
         """
         d = data.reshape(self.batch_size, data.shape[1], len(self.X_), len(self.Y_), len(self.Z_))
-        out = torch.einsum("bcklm,bkp,blp,bmp->bcp", d, torch.conj(self.Fx), torch.conj(self.Fy), torch.conj(self.Fz)) 
+        if self.decompose:
+            tmp = torch.einsum("bcklm,bmp->bcklp", d, self.Fz.conj())  # (B, dv, 2kX, 2kY, nP)
+            tmp = torch.einsum("bcklp,blp->bckp", tmp, self.Fy.conj()) # (B, dv, 2kX, nP)
+            out = torch.einsum("bckp,bkp->bcp", tmp, self.Fx.conj())  # (B, dv, nP)
+        else:
+            out = torch.einsum("bcklm,bkp,blp,bmp->bcp", d, torch.conj(self.Fx), torch.conj(self.Fy), torch.conj(self.Fz)) 
 
         return out
         
