@@ -76,6 +76,12 @@ parser.add_argument(
     "--compile_mode", type=str, default="default", 
     help="compile options ['eager', 'default', 'reduce-overhead', 'max-autotune', 'max-autotune-no-cudagraphs']"
 )
+parser.add_argument(
+    "--model_dtype", type=str, default="float32", 
+    help="Model dtype for layers except FNO_DSE layer, options['float32', 'float64'] ")
+parser.add_argument(
+    "--fno_dtype", type=str, default="float32", 
+    help="FNO_DSE Layer dtype, options['float32', 'float64'] ")
 args = parser.parse_args()
 
 def main(args):
@@ -150,6 +156,14 @@ def main(args):
         benchmark = True if args.benchmark else False
         use_amp = True if args.use_amp == 1 else False
         use_complex_amp = True if args.use_complex_amp == 1 else False
+        if args.model_dtype == 'float32':
+            model_dtype = torch.float32
+        else:
+            model_dtype = torch.float64
+        if args.fno_dtype == 'float32':
+            fno_dtype = torch.float32
+        else:
+            fno_dtype = torch.float64
 
         if benchmark:
             print_rank0('Running FNO training for benchmarking...')
@@ -163,22 +177,40 @@ def main(args):
                                     benchmark=benchmark, use_amp=use_amp, \
                                     use_complex_amp=use_complex_amp, \
                                     compile=compile, \
-                                    compile_mode=compile_mode)
+                                    compile_mode=compile_mode,
+                                    model_dtype=model_dtype, \
+                                    fno_dtype=fno_dtype)
         else:
             model = FourierNeuralOperator(**configs, debug=False, device=device, \
                                             benchmark=True, use_amp=use_amp, \
                                             use_complex_amp=use_complex_amp, \
-                                            compile=False)
+                                            compile=False, model_dtype=model_dtype, \
+                                            fno_dtype=fno_dtype)
         model.learn(nEpoch=N_ITER, save_interval=5)
 
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
 
 if __name__ == "__main__":
-    enable_tf32_only_on_a100()
     if args.compile_train == 1:
         mp.set_start_method("spawn", force=True)
         mp.freeze_support()
+
+    import warnings
+    import numpy as np
+    warnings.filterwarnings("ignore")   
+    seed = 152
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.autograd.set_detect_anomaly(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    # enable_tf32_only_on_a100()
+    torch.set_float32_matmul_precision("high")  # Enable TF32 matmul
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
     main(args)
     
 
