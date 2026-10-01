@@ -249,6 +249,8 @@ class FNO(nn.Module):
                 else:
                     transform_coeff = VandermondeTransform(x_positions=x[:,0,:], 
                                                        kX=self.kX, 
+                                                       x_pos_min=x_pos_min,
+                                                       x_pos_max=x_pos_max,
                                                        dim=self.n_dims,
                                                        device=self.device,
                                                        dtype=self.fno_dtype)
@@ -271,6 +273,10 @@ class FNO(nn.Module):
                                                         y_positions=x[:,1,:],
                                                         kX=self.kX, 
                                                         kY=self.kY,
+                                                        x_pos_min=x_pos_min,
+                                                        x_pos_max=x_pos_max,
+                                                        y_pos_min=y_pos_min,
+                                                        y_pos_max=y_pos_max,
                                                         dim=self.n_dims,
                                                         device=self.device,
                                                         dtype=self.fno_dtype)
@@ -299,6 +305,12 @@ class FNO(nn.Module):
                                                         kX=self.kX, 
                                                         kY=self.kY,
                                                         kZ=self.kZ,
+                                                        x_pos_min=x_pos_min,
+                                                        x_pos_max=x_pos_max,
+                                                        y_pos_min=y_pos_min,
+                                                        y_pos_max=y_pos_max,
+                                                        z_pos_min=z_pos_min,
+                                                        z_pos_max=z_pos_max,
                                                         dim=self.n_dims,
                                                         device=self.device,
                                                         dtype=self.fno_dtype)
