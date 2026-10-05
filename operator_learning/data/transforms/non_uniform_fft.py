@@ -1,15 +1,4 @@
-import ctypes
 import torch
-
-# Apply cuFFT fix only on GB200 (Blackwell, compute capability 10.0)
-if torch.cuda.is_available():
-    cc = torch.cuda.get_device_capability()
-    if cc >= (10, 0):
-        ctypes.CDLL(
-            "/home/rku00286/neopic/CARAML/operator_benchmark/nvidia_fno_packages_arm/nvidia/cu13/lib/libcufft.so.12",
-            mode=ctypes.RTLD_GLOBAL
-        )
-
 import numpy as np
 from torchkbnufft import KbNufft, KbNufftAdjoint, ToepNufft, calc_toeplitz_kernel
 import pytorch_finufft as fin
