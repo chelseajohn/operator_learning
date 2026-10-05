@@ -22,11 +22,12 @@ class VandermondeTransform:
             x_pos_max = torch.max(x_positions)
         x_positions = x_positions - x_pos_min              
         self.x_positions = x_positions * 2*torch.pi /  x_pos_max 
+        self.batch_size = x_positions.shape[0]
+        self.number_points = x_positions.shape[1]
         self.X_ = torch.cat((torch.arange(self.kX, dtype=dtype, device=device), 
                              torch.arange(start=-(self.kX), end=0, dtype=dtype, device=device)), 
                              0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kX, 1]
-        self.batch_size = x_positions.shape[0]
-        self.number_points = x_positions.shape[1]
+        
         
         if dim == 1:
             self.Vt = self.make_1Dmatrix()
