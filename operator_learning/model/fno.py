@@ -125,7 +125,6 @@ class FNO(nn.Module):
         self.kY = kY
         self.kZ = kZ
 
-        # DSE not implemented for 3D
         self.use_dse = use_dse
         # Toeplitz cannot be implemented for PIC
         self.use_toeplitz = use_toeplitz
@@ -133,6 +132,7 @@ class FNO(nn.Module):
         self.use_kb = use_kb 
         # Finufft
         self.use_finufft = use_finufft
+
         assert sum([self.use_dse, self.use_toeplitz, self.use_kb, self.use_finufft]) <= 1, \
             "Exactly one of use_dse, use_toeplitz, use_finufft or use_kb must be True."
 
@@ -224,14 +224,15 @@ class FNO(nn.Module):
         # self.memory = CudaMemoryDebugger(print_mem=True)
  
 
-    def forward(self, x, x_pos_min=None, x_pos_max=None,
-                y_pos_min=None, y_pos_max=None,
-                z_pos_min=None, z_pos_max=None):
+    def forward(self, x, x_pos_min=0.0, x_pos_max=1.0, 
+                y_pos_min=0.0, y_pos_max=1.0,
+                z_pos_min=0.0, z_pos_max=1.0):
         """
         RBC2D/3D:
             x[batchsize, da, nX, nY, (nZ)] -> [batchsize, du, nX, nY, (nZ)] 
         PIC1D/2D/3D:
             x[batchsize, da, nParticle] -> [batchsize, du, nParticle]
+            Expects per sample to be normalised to (0,1)
         """
 
         if self.use_dse:

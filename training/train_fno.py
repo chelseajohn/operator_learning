@@ -37,7 +37,7 @@ class FourierNeuralOperator:
 
     def __init__(self, data:dict=None, model:dict=None, optim:dict=None,
                 lr_scheduler:dict=None, parallel_strategy:dict=None,
-                loss:dict=None, profile:dict=None, checkpoint=None,
+                loss:dict=None, profile:dict=None, checkpoint=None, evalConfig:dict=None,
                 eval_only=False, debug=False, device=None, benchmark=False, use_complex_amp=False,
                 use_amp=False, compile=False, compile_mode='default', data_class='pic', 
                 model_dtype=torch.float32, fno_dtype=torch.float32):
@@ -162,7 +162,7 @@ class FourierNeuralOperator:
                 self.modelConfig = model
             self.dataset = None
             self.dataClass = data_class
-            self.load(checkpoint, modelOnly=True)
+            self.load(checkpoint, modelOnly=True, evalConfig=evalConfig)
             return
 
         # Data loading
@@ -355,19 +355,9 @@ class FourierNeuralOperator:
                 if self.dataClass == 'pic':
                     #data[0] and data[1] already contain this rank's particle shard
                     #(slicing in PICDataset.sample())
+                    # per sample normalised to (0,1)
                     inp = data[0].to(self.device)
                     ref = data[1].to(self.device)
-                    # sharding particles across tp ranks
-                    dim = inp.shape[1]
-                    pos_min = torch.amin(inp, dim=(0,2)) #[dim]
-                    pos_max = torch.amax(inp, dim=(0,2))
-                    if self.TP_enabled:
-                        tp_group = self.tp_mesh.get_group()
-                        dist.all_reduce(pos_min, op=dist.ReduceOp.MIN, group=tp_group)
-                        dist.all_reduce(pos_max, op=dist.ReduceOp.MAX, group=tp_group)
-                    x_pos_min, x_pos_max = pos_min[0], pos_max[0]
-                    y_pos_min, y_pos_max = (pos_min[1], pos_max[1]) if dim > 1 else (None, None)
-                    z_pos_min, z_pos_max = (pos_min[2], pos_max[2]) if dim > 2 else (None, None)
                 else:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
@@ -389,11 +379,7 @@ class FourierNeuralOperator:
                 # Forward pass
                 if self.enable_profile:
                     nvtx.range_push("forward")
-                pred = model(inp,
-                            x_pos_min=x_pos_min, x_pos_max=x_pos_max,
-                            y_pos_min=y_pos_min, y_pos_max=y_pos_max, 
-                            z_pos_min=z_pos_min, z_pos_max=z_pos_max
-                            )
+                pred = model(inp)
                 if self.enable_profile:
                     nvtx.range_pop()   # end forward
     
@@ -855,7 +841,7 @@ class FourierNeuralOperator:
         if self.rank == 0:
             torch.save(checkpoint, path)
 
-    def load(self, filename, modelOnly=False):
+    def load(self, filename, modelOnly=False, evalConfig=None):
         if self.DDP_enabled:
             map_location = {f'cuda:0': f'{self.device}'}
         else:
@@ -892,6 +878,14 @@ class FourierNeuralOperator:
                     checkpoint['model'][key] = value
             print_rank0("WARNING : different model settings in config file,"
                     " overwriting with config from checkpoint ...")
+
+        if evalConfig is not None:
+            checkpoint['model'].update({
+                            k: v for k, v in evalConfig.items()
+                            if k in checkpoint['model']
+                        })
+            print_rank0("WARNING : different model settings in eval config file,"
+                            " overwriting with eval config from checkpoint ...")
 
         print_rank0(f"Model: {checkpoint['model']}")
         state_dict = checkpoint['model_state_dict']
