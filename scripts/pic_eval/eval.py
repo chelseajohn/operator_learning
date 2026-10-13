@@ -74,6 +74,7 @@ if args.config is not None:
     config = readConfig(args.config)
     if "eval" in config:
         args.__dict__.update(**config["eval"])
+        evalConfig = config.get("eval")
     if "train" in config and "checkpoint" in config["train"]:
         args.checkpoint = config.train.checkpoint
         if "trainDir" in config.train:
@@ -117,6 +118,7 @@ if checkpoint is not None:
         model_dtype=model_dtype,
         fno_dtype=fno_dtype,
         parallel_strategy=infer_parallel_strategy,
+        evalConfig=evalConfig
     )
     # extract TP params to later pass into PICVisualizer
     if fno_model.TP_enabled:
