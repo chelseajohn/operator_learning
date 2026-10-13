@@ -189,8 +189,8 @@ class Finufft:
         data_t: (dv, modes_flat) complex
         returns (dv, N) complex
         """
-        grid = data_t.reshape(data_t.shape[0], *self._n_modes, eps=1e-6, modeord=1, isign=1) # (dv, *n_modes)
-        out = fin.functional.finufft_type2(pts, grid,)
+        grid = data_t.reshape(data_t.shape[0], *self._n_modes) # (dv, *n_modes)
+        out = fin.functional.finufft_type2(pts, grid, eps=1e-6, modeord=1, isign=1, gpu_method=0)
         return out  # (dv, N)
 
     def forward(self, data):
