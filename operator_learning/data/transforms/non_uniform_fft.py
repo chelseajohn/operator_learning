@@ -86,10 +86,11 @@ class Finufft:
     """ 
     Supports 1D/2D/3D spatial transforms over non-uniform 
     particle positions using pytorch finufft.
-    Matrix Coeffecients are constructed using position samples 
-    normalised to (0,1)
+    Particle positions are assumed to be normalized to [0, 1] by default and
+    are scaled to [0, 2π) for the Fourier transform. Custom spatial bounds can
+    be provided through the min/max position arguments
     """
-    def __init__(self, x_positions, kX,x_pos_min=0.0, x_pos_max=1.0, 
+    def __init__(self, x_positions, kX, x_pos_min=0.0, x_pos_max=1.0, 
                  y_positions=None, kY=None, y_pos_min=0.0, y_pos_max=1.0,
                  z_positions=None, kZ=None, z_pos_min=0.0, z_pos_max=1.0,
                  dim=1, device='cuda', dtype=torch.float32):
@@ -97,64 +98,26 @@ class Finufft:
         self.device = device
         assert dim in (1, 2, 3), "dim must be 1 or 2 or 3"
         self.dim = dim
-        self.kX = 2*kX
-        self.check_normalisation(
-                    "x_positions", x_positions, x_pos_min, x_pos_max
-                )
-        x_positions = x_positions - x_pos_min              
-        self.x_positions = x_positions * 2*torch.pi / (x_pos_max - x_pos_min)  
+        self.kX = 2*kX        
+        if x_pos_min != 0.0 or x_pos_max != 1.0:
+            x_positions = (x_positions - x_pos_min) / (x_pos_max - x_pos_min) 
+        self.x_positions = x_positions*2*torch.pi 
         self.batch_size = x_positions.shape[0]
         self.number_points = x_positions.shape[1]
         self.dtype = dtype
       
         if dim > 1:  
-            self.kY = 2*kY if kY is not None else 2*kX
-            self.check_normalisation(
-                            "y_positions", y_positions, y_pos_min, y_pos_max
-                        )
-            y_positions = y_positions - y_pos_min              
-            self.y_positions = y_positions * 2*torch.pi / (y_pos_max - y_pos_min)    
+            self.kY = 2*kY if kY is not None else 2*kX 
+            if y_pos_min != 0.0 or y_pos_max != 1.0:
+                y_positions = (y_positions - y_pos_min) / (y_pos_max - y_pos_min)        
+            self.y_positions = y_positions*2*torch.pi 
            
         if dim > 2:
-            self.kZ = 2*kZ if kZ is not None else 2*kX
-            self.check_normalisation(
-                            "z_positions", z_positions, z_pos_min, z_pos_max
-                        )
-            z_positions = z_positions - z_pos_min                          
-            self.z_positions = z_positions * 2*torch.pi / (z_pos_max - z_pos_min)               
-            
+            self.kZ = 2*kZ if kZ is not None else 2*kX   
+            if z_pos_min != 0.0 or z_pos_max != 1.0:
+                z_positions = (z_positions - z_pos_min) / (z_pos_max - z_pos_min)                   
+            self.z_positions = z_positions*2*torch.pi 
     
-    def check_normalisation(self, name, positions, pos_min, pos_max):
-            if pos_min != 0.0 or pos_max != 1.0:
-                print(
-                    f"[Warning] {name}: Bounds ({pos_min}, {pos_max}) "
-                    "differ from the expected (0, 1)."
-                )
-            else:
-                # Check each sample independently
-                sample_min = positions.amin(dim=1)
-                sample_max = positions.amax(dim=1)
-                tol = 1e-5
-    
-                valid = (
-                    torch.isclose(
-                        sample_min, torch.zeros_like(sample_min),
-                        atol=tol
-                    )
-                    &
-                    torch.isclose(
-                        sample_max, torch.ones_like(sample_max),
-                        atol=tol
-                    )
-                )
-    
-                if not valid.all():
-                    bad_samples = (~valid).nonzero(as_tuple=True)[0].tolist()
-                    print(
-                        f"[Warning] {name}: Samples {bad_samples} "
-                        "are not normalised to (0, 1)."
-                    )
-
     def _get_pts(self, t):
         """Get spatial coordinate tuple for timestep t."""
         if self.dim == 1:

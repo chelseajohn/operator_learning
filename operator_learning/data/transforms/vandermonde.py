@@ -6,7 +6,9 @@ class VandermondeTransform:
     """
     Class for 1,2,3-dimensional Fourier transforms on a nonequispaced lattice of data
     ref: https://github.com/camlab-ethz/DSE-for-NeuralOperators/blob/main/ShearLayer/fno_dse.py 
-    Matrix Coeffecients are constructed using position samples normalised to (0,1)
+    Particle positions are assumed to be normalized to [0, 1] by default and
+    are scaled to [0, 2π) for the Fourier transform. Custom spatial bounds can
+    be provided through the min/max position arguments
     """
     def __init__(self, x_positions, kX, x_pos_min=0.0, x_pos_max=1.0, 
                  y_positions=None, kY=None, y_pos_min=0.0, y_pos_max=1.0,
@@ -17,11 +19,9 @@ class VandermondeTransform:
         assert dim in (1, 2,3), "dim must be 1 or 2 or 3"
         self.dim = dim
         self.kX = kX
-        self.check_normalisation(
-                    "x_positions", x_positions, x_pos_min, x_pos_max
-                )
-        x_positions = x_positions - x_pos_min              
-        self.x_positions = x_positions * 2*torch.pi /  x_pos_max 
+        if x_pos_min != 0.0 or x_pos_max != 1.0:
+            x_positions = (x_positions - x_pos_min) / x_pos_max             
+        self.x_positions = x_positions*2*torch.pi 
         self.batch_size = x_positions.shape[0]
         self.number_points = x_positions.shape[1]
         self.X_ = torch.cat((torch.arange(self.kX, dtype=dtype, device=device), 
@@ -33,68 +33,31 @@ class VandermondeTransform:
             self.Vt = self.make_1Dmatrix()
         elif dim == 2:
             self.kY = kY if kY is not None else kX
-            self.check_normalisation(
-                            "y_positions", y_positions, y_pos_min, y_pos_max
-                        )
-            y_positions = y_positions - torch.min(y_positions)
-            self.y_positions = y_positions * 2*torch.pi /y_pos_max  
             self.Y_ = torch.cat((torch.arange(self.kY, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kY), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kY, 1]
+            if y_pos_min != 0.0 or y_pos_max != 1.0:
+                y_positions = (y_positions - y_pos_min) / y_pos_max              
+            self.y_positions = y_positions*2*torch.pi 
             self.Vt = self.make_2Dmatrix()
         else:
             self.kY = kY if kY is not None else kX
-            self.check_normalisation(
-                                    "y_positions", y_positions, y_pos_min, y_pos_max
-                                    )
-            y_positions = y_positions - y_pos_min 
-            self.y_positions = y_positions * 2*torch.pi /y_pos_max  
             self.Y_ = torch.cat((torch.arange(self.kY, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kY), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kY, 1]
+            if y_pos_min != 0.0 or y_pos_max != 1.0:
+                y_positions = (y_positions - y_pos_min) / y_pos_max              
+            self.y_positions = y_positions*2*torch.pi 
 
             self.kZ = kZ if kZ is not None else kZ
-            self.check_normalisation(
-                            "z_positions", z_positions, z_pos_min, z_pos_max
-                        )
-            z_positions = z_positions - z_pos_min
-            self.z_positions = z_positions * 2*torch.pi / z_pos_max 
             self.Z_ = torch.cat((torch.arange(self.kZ, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kZ), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kZ, 1]
+            if z_pos_min != 0.0 or z_pos_max != 1.0:
+                z_positions = (z_positions - z_pos_min) / z_pos_max                  
+            self.z_positions = z_positions*2*torch.pi   
             self.Vt = self.make_3Dmatrix()
 
-    def check_normalisation(self, name, positions, pos_min, pos_max):
-            if pos_min != 0.0 or pos_max != 1.0:
-                print(
-                    f"[Warning] {name}: Bounds ({pos_min}, {pos_max}) "
-                    "differ from the expected (0, 1)."
-                )
-            else:
-                # Check each sample independently
-                sample_min = positions.amin(dim=1)
-                sample_max = positions.amax(dim=1)
-                tol = 1e-5
-    
-                valid = (
-                    torch.isclose(
-                        sample_min, torch.zeros_like(sample_min),
-                        atol=tol
-                    )
-                    &
-                    torch.isclose(
-                        sample_max, torch.ones_like(sample_max),
-                        atol=tol
-                    )
-                )
-    
-                if not valid.all():
-                    bad_samples = (~valid).nonzero(as_tuple=True)[0].tolist()
-                    print(
-                        f"[Warning] {name}: Samples {bad_samples} "
-                        "are not normalised to (0, 1)."
-                    )
-    
     def make_1Dmatrix(self):
   
         with torch.no_grad():
