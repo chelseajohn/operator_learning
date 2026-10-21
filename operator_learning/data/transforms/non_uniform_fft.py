@@ -158,11 +158,11 @@ class Finufft:
     def _get_pts(self, t):
         """Get spatial coordinate tuple for timestep t."""
         if self.dim == 1:
-            return self.x_positions[t]
+            return (self.x_positions[t]).to(self.dtype)
         elif self.dim == 2:
-            return torch.stack((self.x_positions[t], self.y_positions[t]))
+            return torch.stack((self.x_positions[t], self.y_positions[t])).to(self.dtype)
         else:
-            return torch.stack((self.x_positions[t], self.y_positions[t], self.z_positions[t]))
+            return torch.stack((self.x_positions[t], self.y_positions[t], self.z_positions[t])).to(self.dtype)
 
     @property
     def _n_modes(self):
