@@ -6,22 +6,22 @@ class VandermondeTransform:
     """
     Class for 1,2,3-dimensional Fourier transforms on a nonequispaced lattice of data
     ref: https://github.com/camlab-ethz/DSE-for-NeuralOperators/blob/main/ShearLayer/fno_dse.py 
+    Particle positions are assumed to be normalized to [0, 1] by default and
+    are scaled to [0, 2π) for the Fourier transform. Custom spatial bounds can
+    be provided through the min/max position arguments
     """
-    def __init__(self, x_positions, kX, x_pos_min=None, x_pos_max=None, 
-                y_positions=None, kY=None, y_pos_min=None, y_pos_max=None,
-                z_positions=None, kZ=None, z_pos_min=None, z_pos_max=None,
+    def __init__(self, x_positions, kX, x_pos_min=0.0, x_pos_max=1.0, 
+                 y_positions=None, kY=None, y_pos_min=0.0, y_pos_max=1.0,
+                 z_positions=None, kZ=None, z_pos_min=0.0, z_pos_max=1.0,
                 dim=1, device='cuda', dtype=torch.float32):
         self.device = device
         self.dtype = dtype
         assert dim in (1, 2,3), "dim must be 1 or 2 or 3"
         self.dim = dim
         self.kX = kX
-        if x_pos_min is None:
-            x_pos_min = torch.min(x_positions) 
-        if x_pos_max is None:
-            x_pos_max = torch.max(x_positions)
-        x_positions = x_positions - x_pos_min              
-        self.x_positions = x_positions * 2*torch.pi /  x_pos_max 
+        if x_pos_min != 0.0 or x_pos_max != 1.0:
+            x_positions = (x_positions - x_pos_min) / x_pos_max             
+        self.x_positions = x_positions*2*torch.pi 
         self.batch_size = x_positions.shape[0]
         self.number_points = x_positions.shape[1]
         self.X_ = torch.cat((torch.arange(self.kX, dtype=dtype, device=device), 
@@ -32,39 +32,30 @@ class VandermondeTransform:
         if dim == 1:
             self.Vt = self.make_1Dmatrix()
         elif dim == 2:
-            if y_pos_min is None:
-                y_pos_min = torch.min(y_positions) 
-            if y_pos_max is None:
-                y_pos_max = torch.max(y_positions)
             self.kY = kY if kY is not None else kX
-            y_positions = y_positions - torch.min(y_positions)
-            self.y_positions = y_positions * 2*torch.pi /y_pos_max  
             self.Y_ = torch.cat((torch.arange(self.kY, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kY), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kY, 1]
+            if y_pos_min != 0.0 or y_pos_max != 1.0:
+                y_positions = (y_positions - y_pos_min) / y_pos_max              
+            self.y_positions = y_positions*2*torch.pi 
             self.Vt = self.make_2Dmatrix()
         else:
-            if y_pos_min is None:
-                y_pos_min = torch.min(y_positions) 
-            if y_pos_max is None:
-                y_pos_max = torch.max(y_positions)
             self.kY = kY if kY is not None else kX
-            y_positions = y_positions - y_pos_min 
-            self.y_positions = y_positions * 2*torch.pi /y_pos_max  
             self.Y_ = torch.cat((torch.arange(self.kY, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kY), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kY, 1]
+            if y_pos_min != 0.0 or y_pos_max != 1.0:
+                y_positions = (y_positions - y_pos_min) / y_pos_max              
+            self.y_positions = y_positions*2*torch.pi 
 
-            if z_pos_min is None:
-                z_pos_min = torch.min(z_positions) 
-            if z_pos_max is None:
-                z_pos_max = torch.max(z_positions)
             self.kZ = kZ if kZ is not None else kZ
-            z_positions = z_positions - z_pos_min
-            self.z_positions = z_positions * 2*torch.pi / z_pos_max 
             self.Z_ = torch.cat((torch.arange(self.kZ, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kZ), end=0, dtype=dtype, device=device)),
                                  0).repeat(self.batch_size, 1)[:,:,None] # [B, 2kZ, 1]
+            if z_pos_min != 0.0 or z_pos_max != 1.0:
+                z_positions = (z_positions - z_pos_min) / z_pos_max                  
+            self.z_positions = z_positions*2*torch.pi   
             self.Vt = self.make_3Dmatrix()
 
     def make_1Dmatrix(self):

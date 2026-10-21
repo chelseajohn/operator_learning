@@ -164,7 +164,8 @@ def scatterFourier(XP, SHat, NG, N, Q, L, dim, testCase, wp=1):
                 n_modes=(NG,NG,NG),
                 eps=1e-12,
                 isign=-1,
-                modeord=1)) / (L[0] * L[1] * L[2])
+                modeord=1,
+                gpu_method=3)) / (L[0] * L[1] * L[2])
 
     return rhoHat
 

@@ -7,10 +7,13 @@ torch.backends.opt_einsum.strategy = 'auto'  # auto, greedy, optimal, auto-hq
 class VandermondeTransformMatrixFree:
     """
     Matrix-free 1D/2D/3D Fourier transforms on a non-uniform lattice.
+    Particle positions are assumed to be normalized to [0, 1] by default and
+    are scaled to [0, 2π) for the Fourier transform. Custom spatial bounds can
+    be provided through the min/max position arguments
     """
-    def __init__(self, x_positions, kX, x_pos_min=None, x_pos_max=None, 
-                 y_positions=None, kY=None, y_pos_min=None, y_pos_max=None,
-                 z_positions=None, kZ=None, z_pos_min=None, z_pos_max=None,
+    def __init__(self, x_positions, kX, x_pos_min=0.0, x_pos_max=1.0, 
+                 y_positions=None, kY=None, y_pos_min=0.0, y_pos_max=1.0,
+                 z_positions=None, kZ=None, z_pos_min=0.0, z_pos_max=1.0,
                  dim=1, device='cuda', dtype=torch.float32, decompose=False):
         self.device = device
         self.dtype = dtype
@@ -18,12 +21,9 @@ class VandermondeTransformMatrixFree:
         assert dim in (1, 2, 3), "dim must be 1 or 2 or 3"
         self.dim = dim
         self.kX = kX
-        if x_pos_min is None:
-            x_pos_min = torch.min(x_positions) 
-        if x_pos_max is None:
-            x_pos_max = torch.max(x_positions)
-        x_positions = x_positions - x_pos_min              
-        self.x_positions = x_positions * 2*torch.pi /  x_pos_max 
+        if x_pos_min != 0.0 or x_pos_max != 1.0:
+            x_positions = (x_positions - x_pos_min) / x_pos_max             
+        self.x_positions = x_positions*2*torch.pi 
         self.X_ = torch.cat((torch.arange(self.kX, dtype=dtype, device=device), 
                              torch.arange(start=-(self.kX), end=0, dtype=dtype, device=device)), 
                              0)
@@ -32,28 +32,22 @@ class VandermondeTransformMatrixFree:
         self.Fx = torch.exp(-1j * self.X_[None, :, None] * self.x_positions[:, None, :]) #(batchsize, 2*kX, nParticle)
 
         if dim > 1:  
-            if y_pos_min is None:
-                y_pos_min = torch.min(y_positions) 
-            if y_pos_max is None:
-                y_pos_max = torch.max(y_positions)
             self.kY = kY if kY is not None else kX
             self.Y_ = torch.cat((torch.arange(self.kY, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kY), end=0, dtype=dtype, device=device)),
                                  0)
-            y_positions = y_positions - y_pos_min              
-            self.y_positions = y_positions * 2*torch.pi /y_pos_max  
+            if y_pos_min != 0.0 or y_pos_max != 1.0:
+                y_positions = (y_positions - y_pos_min) / y_pos_max              
+            self.y_positions = y_positions*2*torch.pi 
             self.Fy = torch.exp(-1j * self.Y_[None, :, None] * self.y_positions[:, None, :]) #(batchsize, 2*kY, nParticle)
         if dim > 2:
-            if z_pos_min is None:
-                z_pos_min = torch.min(z_positions) 
-            if z_pos_max is None:
-                z_pos_max = torch.max(z_positions)
             self.kZ = kZ if kZ is not None else kX
             self.Z_ = torch.cat((torch.arange(self.kZ, dtype=dtype, device=device),
                                  torch.arange(start=-(self.kZ), end=0, dtype=dtype, device=device)),
                                  0)
-            z_positions = z_positions - z_pos_min                          
-            self.z_positions = z_positions * 2*torch.pi / z_pos_max             
+            if z_pos_min != 0.0 or z_pos_max != 1.0:
+                z_positions = (z_positions - z_pos_min) / z_pos_max                  
+            self.z_positions = z_positions*2*torch.pi              
             self.Fz = torch.exp(-1j * self.Z_[None, :, None] * self.z_positions[:, None, :]) #(batchsize, 2*kZ, nParticle)
 
 

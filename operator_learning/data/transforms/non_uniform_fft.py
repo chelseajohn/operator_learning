@@ -85,46 +85,39 @@ class NUFFTTransform:
 class Finufft:
     """ 
     Supports 1D/2D/3D spatial transforms over non-uniform 
-    particle positions using pytorch finufft
+    particle positions using pytorch finufft.
+    Particle positions are assumed to be normalized to [0, 1] by default and
+    are scaled to [0, 2π) for the Fourier transform. Custom spatial bounds can
+    be provided through the min/max position arguments
     """
-    def __init__(self, x_positions, kX, x_pos_min=None, x_pos_max=None,
-                 y_positions=None, kY=None, y_pos_min=None, y_pos_max=None,
-                 z_positions=None, kZ=None, z_pos_min=None, z_pos_max=None,
+    def __init__(self, x_positions, kX, x_pos_min=0.0, x_pos_max=1.0, 
+                 y_positions=None, kY=None, y_pos_min=0.0, y_pos_max=1.0,
+                 z_positions=None, kZ=None, z_pos_min=0.0, z_pos_max=1.0,
                  dim=1, device='cuda', dtype=torch.float32):
         
         self.device = device
         assert dim in (1, 2, 3), "dim must be 1 or 2 or 3"
         self.dim = dim
-        self.kX = 2*kX
-        if x_pos_min is None:
-            x_pos_min = torch.min(x_positions) 
-        if x_pos_max is None:
-            x_pos_max = torch.max(x_positions)
-        x_positions = x_positions - x_pos_min              
-        self.x_positions = x_positions * 2*torch.pi /  x_pos_max 
+        self.kX = 2*kX        
+        if x_pos_min != 0.0 or x_pos_max != 1.0:
+            x_positions = (x_positions - x_pos_min) / (x_pos_max - x_pos_min) 
+        self.x_positions = x_positions*2*torch.pi 
         self.batch_size = x_positions.shape[0]
         self.number_points = x_positions.shape[1]
         self.dtype = dtype
       
         if dim > 1:  
-            if y_pos_min is None:
-                y_pos_min = torch.min(y_positions) 
-            if y_pos_max is None:
-                y_pos_max = torch.max(y_positions)
-            self.kY = 2*kY if kY is not None else 2*kX
-            y_positions = y_positions - y_pos_min              
-            self.y_positions = y_positions * 2*torch.pi /y_pos_max  
+            self.kY = 2*kY if kY is not None else 2*kX 
+            if y_pos_min != 0.0 or y_pos_max != 1.0:
+                y_positions = (y_positions - y_pos_min) / (y_pos_max - y_pos_min)        
+            self.y_positions = y_positions*2*torch.pi 
            
         if dim > 2:
-            if z_pos_min is None:
-                z_pos_min = torch.min(z_positions) 
-            if z_pos_max is None:
-                z_pos_max = torch.max(z_positions)
-            self.kZ = 2*kZ if kZ is not None else 2*kX
-            z_positions = z_positions - z_pos_min                          
-            self.z_positions = z_positions * 2*torch.pi / z_pos_max             
-            
-
+            self.kZ = 2*kZ if kZ is not None else 2*kX   
+            if z_pos_min != 0.0 or z_pos_max != 1.0:
+                z_positions = (z_positions - z_pos_min) / (z_pos_max - z_pos_min)                   
+            self.z_positions = z_positions*2*torch.pi 
+    
     def _get_pts(self, t):
         """Get spatial coordinate tuple for timestep t."""
         if self.dim == 1:
@@ -150,7 +143,7 @@ class Finufft:
         returns (dv, modes_flat) complex
         """
         # finufft type1 with batched sources: values (dv, N) -> output (dv, *n_modes)
-        out = fin.functional.finufft_type1(pts, data_t, self._n_modes)
+        out = fin.functional.finufft_type1(pts, data_t, self._n_modes, eps=1e-6, modeord=1, isign=-1, gpu_method=3)
         return out.reshape(data_t.shape[0], -1)  # (dv, modes_flat)
 
     def _inverse_single(self, pts, data_t):
@@ -159,8 +152,8 @@ class Finufft:
         data_t: (dv, modes_flat) complex
         returns (dv, N) complex
         """
-        grid = data_t.reshape(data_t.shape[0], *self._n_modes)  # (dv, *n_modes)
-        out = fin.functional.finufft_type2(pts, grid,)
+        grid = data_t.reshape(data_t.shape[0], *self._n_modes) # (dv, *n_modes)
+        out = fin.functional.finufft_type2(pts, grid, eps=1e-6, modeord=1, isign=1, gpu_method=0)
         return out  # (dv, N)
 
     def forward(self, data):
