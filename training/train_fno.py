@@ -358,6 +358,17 @@ class FourierNeuralOperator:
                     # per sample normalised to (0,1)
                     inp = data[0].to(self.device)
                     ref = data[1].to(self.device)
+                    # dim = inp.shape[1]
+                    # pos_min = torch.amin(inp, dim=(0,2))
+                    # pos_max = torch.amax(inp, dim=(0,2))
+                    # if self.TP_enabled:
+                    #     tp_group = self.tp_mesh.get_group()
+                    #     dist.all_reduce(pos_min, op=dist.ReduceOp.MIN, group=tp_group)
+                    #     dist.all_reduce(pos_max, op=dist.ReduceOp.MAX, group=tp_group)
+                    #     print(f'[Rank {self.rank}]: start_idx={start}, end_idx={end}')
+                    # x_pos_min, x_pos_max = pos_min[0], pos_max[0]
+                    # y_pos_min, y_pos_max = (pos_min[1], pos_max[1]) if dim > 1 else (None, None)
+                    # z_pos_min, z_pos_max = (pos_min[2], pos_max[2]) if dim > 2 else (None, None)
                 else:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
@@ -550,26 +561,22 @@ class FourierNeuralOperator:
                     # sharding particles across tp ranks
                     inp = data[0].to(self.device)
                     ref = data[1].to(self.device)
-                    dim = inp.shape[1]
-                    pos_min = torch.amin(inp, dim=(0,2))
-                    pos_max = torch.amax(inp, dim=(0,2))
-                    if self.TP_enabled:
-                        tp_group = self.tp_mesh.get_group()
-                        dist.all_reduce(pos_min, op=dist.ReduceOp.MIN, group=tp_group)
-                        dist.all_reduce(pos_max, op=dist.ReduceOp.MAX, group=tp_group)
-                        # print(f'[Rank {self.rank}]: start_idx={start}, end_idx={end}')
-                    x_pos_min, x_pos_max = pos_min[0], pos_max[0]
-                    y_pos_min, y_pos_max = (pos_min[1], pos_max[1]) if dim > 1 else (None, None)
-                    z_pos_min, z_pos_max = (pos_min[2], pos_max[2]) if dim > 2 else (None, None)
+                    # dim = inp.shape[1]
+                    # pos_min = torch.amin(inp, dim=(0,2))
+                    # pos_max = torch.amax(inp, dim=(0,2))
+                    # if self.TP_enabled:
+                    #     tp_group = self.tp_mesh.get_group()
+                    #     dist.all_reduce(pos_min, op=dist.ReduceOp.MIN, group=tp_group)
+                    #     dist.all_reduce(pos_max, op=dist.ReduceOp.MAX, group=tp_group)
+                    #     print(f'[Rank {self.rank}]: start_idx={start}, end_idx={end}')
+                    # x_pos_min, x_pos_max = pos_min[0], pos_max[0]
+                    # y_pos_min, y_pos_max = (pos_min[1], pos_max[1]) if dim > 1 else (None, None)
+                    # z_pos_min, z_pos_max = (pos_min[2], pos_max[2]) if dim > 2 else (None, None)
                 else:
                     inp = data[0][..., ::self.xStep, ::self.yStep].to(self.device)
                     ref = data[1][..., ::self.xStep, ::self.yStep].to(self.device)
 
-                pred = model(inp,
-                            x_pos_min=x_pos_min, x_pos_max=x_pos_max,
-                            y_pos_min=y_pos_min, y_pos_max=y_pos_max, 
-                            z_pos_min=z_pos_min, z_pos_max=z_pos_max
-                            )
+                pred = model(inp)
                 local_loss = self.lossFunction(pred,ref)
                 error_nr = torch.mean(torch.abs(ref.flatten(start_dim=1) - pred.flatten(start_dim=1)))
                 error_dr = torch.mean(torch.abs(ref.flatten(start_dim=1)))
