@@ -150,8 +150,6 @@ if __name__ == "__main__":
         torch.backends.cudnn.deterministic = False
     else:
         torch.backends.cudnn.deterministic = True
-
-    torch.backends.cudnn.deterministic = False
     
     if args.compile_train == 1:
         mp.set_start_method("spawn", force=True)
