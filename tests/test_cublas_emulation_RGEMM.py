@@ -23,6 +23,15 @@ import torch.nn as nn
 from torch.profiler import profile, ProfilerActivity
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
+torch.backends.cudnn.benchmark = True
+
+if "GH200" in torch.cuda.get_device_name(0):
+    # torch.nn.conv1D with cuBLAS kernel is faster 
+    # than cuDNN on GH200
+    torch.backends.cudnn.deterministic = False
+else:
+    torch.backends.cudnn.deterministic = True
+
 # torch.backends.cuda.matmul.fp32_precision = "bfx9"
 
 
