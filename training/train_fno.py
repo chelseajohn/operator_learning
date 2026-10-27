@@ -156,13 +156,13 @@ class FourierNeuralOperator:
             print_rank0("OZAKI-II GEMMul8 : OFF")
        
         # ozaki cublas check
-        print("CUBLAS_EMULATE_DOUBLE_PRECISION:",
+        print_rank0("CUBLAS_EMULATE_DOUBLE_PRECISION:",
             os.getenv("CUBLAS_EMULATE_DOUBLE_PRECISION", "<unset>"))
-        print("CUBLAS_EMULATE_SINGLE_PRECISION:",
+        print_rank0("CUBLAS_EMULATE_SINGLE_PRECISION:",
             os.getenv("CUBLAS_EMULATE_SINGLE_PRECISION", "<unset>"))
-        print("CUBLAS_EMULATION_STRATEGY:",
+        print_rank0("CUBLAS_EMULATION_STRATEGY:",
             os.getenv("CUBLAS_EMULATION_STRATEGY", "<unset>"))
-        print("CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT:",
+        print_rank0("CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT:",
             os.getenv("CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT",
                         "<unset>"))
 
