@@ -135,7 +135,8 @@ class Finufft:
             return (self.kX, self.kY)
         else:
             return (self.kX, self.kY, self.kZ)
-
+        
+    @torch._dynamo.disable
     def _forward_single(self, pts, data_t):
         """
         pts:    (dim, N)
@@ -146,6 +147,7 @@ class Finufft:
         out = fin.functional.finufft_type1(pts, data_t, self._n_modes, eps=1e-6, modeord=1, isign=-1, gpu_method=3)
         return out.reshape(data_t.shape[0], -1)  # (dv, modes_flat)
 
+    @torch._dynamo.disable
     def _inverse_single(self, pts, data_t):
         """
         pts:    (dim, N)
