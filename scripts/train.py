@@ -139,17 +139,11 @@ if __name__ == "__main__":
     torch.cuda.manual_seed_all(seed)
     torch.autograd.set_detect_anomaly(True)
     torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
     # enable_tf32_only_on_a100()
     torch.set_float32_matmul_precision("high")  # Enable TF32 matmul
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-
-    if "GH200" in torch.cuda.get_device_name(0):
-        # torch.nn.conv1D with cuBLAS kernel is faster 
-        # than cuDNN on GH200
-        torch.backends.cudnn.deterministic = False
-    else:
-        torch.backends.cudnn.deterministic = True
     
     if args.compile_train == 1:
         mp.set_start_method("spawn", force=True)
