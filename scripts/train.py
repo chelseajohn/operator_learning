@@ -138,8 +138,8 @@ if __name__ == "__main__":
     np.random.seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.autograd.set_detect_anomaly(True)
-    torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
     # enable_tf32_only_on_a100()
     torch.set_float32_matmul_precision("high")  # Enable TF32 matmul
     torch.backends.cuda.matmul.allow_tf32 = True
